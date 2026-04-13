@@ -1,0 +1,235 @@
+================================================================================
+ NuCRM SaaS — MASTER PLAN INDEX
+ Complete Planning Documents — All Departments
+================================================================================
+
+This folder contains the COMPLETE plan for NuCRM SaaS.
+Read this file first — it guides you through every document in order.
+
+================================================================================
+ HOW TO READ THESE PLANS (In This Order)
+================================================================================
+
+STEP 1 → Read: 01_COMPLETE_DESIGN_PLAN_PAPER.txt
+         This is the MASTER PLAN — the single source of truth.
+         It covers:
+         ✓ Complete audit of existing system (391 files mapped)
+         ✓ What to add per module (no duplication)
+         ✓ Rule-based vs AI split for each module
+         ✓ Database changes (7 new tables, 0 modifications)
+         ✓ API routes to create (16 new)
+         ✓ UI pages to create (9 new)
+         ✓ Components to create (17 new)
+         ✓ Worker queues to add (6 new)
+         ✓ Workflow diagrams (step-by-step)
+         ✓ Cost breakdown per customer
+         ✓ 4-week build plan (day by day)
+
+STEP 2 → Read: 02_COMPLETE_TECHNICAL_BLUEPRINT.txt
+         Deep technical architecture — how the entire system works end-to-end.
+         It covers:
+         ✓ All 83+ database tables with purpose and relationships
+         ✓ How the dynamic schema (JSONB metadata) eliminates migrations
+         ✓ How each AI module stores and reads data
+         ✓ How external services connect (WhatsApp, Twilio, Stripe, OpenAI)
+         ✓ How billing gates features by plan
+         ✓ How data flows between every module
+         ✓ How money is made (cost + pricing breakdown)
+         ✓ Scaling plan (1 to 10,000 customers)
+         ✓ Security and data protection
+
+STEP 3 → Read: 03_AI_INTEGRATION_DETAILED_PLAN.txt
+         Research-backed plan for each AI module with real-world validation.
+         It covers:
+         ✓ Each AI module — how it works, who uses it, real-world proof
+         ✓ Exact APIs/services needed — with pricing, limits, alternatives
+         ✓ Integration flow diagrams — step-by-step data flow
+         ✓ What already exists vs what needs to be built
+         ✓ Risk assessment and fallback strategies
+         ✓ Detailed execution plan — day by day, file by file
+
+STEP 4 → Read: 04_TOKEN_CONTROL_SYSTEM.txt
+         Superadmin token and usage control system.
+         It covers:
+         ✓ Global budget management (per service, per month)
+         ✓ Per-tenant usage limits
+         ✓ Per-user limits within a tenant
+         ✓ API key rotation and management
+         ✓ Anomaly detection (spike alerts)
+         ✓ Usage alerts and notifications
+         ✓ Complete superadmin UI design
+         ✓ How it integrates into every AI module
+
+STEP 5 → Read: 05_GO_TO_MARKET_COMPLETE_STRATEGY.txt
+         How to sell, who to sell to, pricing, marketing, and launch.
+         It covers:
+         ✓ Target customer profile (3 specific personas)
+         ✓ Pricing strategy (5 tiers: Free → ₹14,999/month)
+         ✓ Sales pitch (30-second, 5-minute demo, objection handling)
+         ✓ Marketing strategy (6 channels: LinkedIn, YouTube, Google, etc.)
+         ✓ Sales funnel (1000 → 10 paying customers math)
+         ✓ Competitive positioning (vs HubSpot, Zoho, Pipedrive)
+         ✓ Launch strategy (first 100 customers in 6 months)
+         ✓ Revenue projections (₹37.4 lakh Year 1 conservative)
+         ✓ Required documents and assets checklist
+         ✓ First 30 days action plan
+         ✓ Script templates (cold call, WhatsApp, email, demo)
+
+================================================================================
+ DOCUMENT MAP — What Each Document Covers
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ DEPARTMENT          │ Which Document(s)          │ What's Covered           │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ DATABASE DESIGN     │ 01, 02, 03                 │ All tables, migrations,  │
+│                     │                            │ relationships, JSONB     │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ API DESIGN          │ 01, 03                     │ All routes, request/     │
+│                     │                            │ response formats         │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ UI/UX DESIGN        │ 01, 03, 04                 │ All pages, components,   │
+│                     │                            │ wireframe descriptions   │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ AI MODULES          │ 01, 02, 03                 │ Each module's AI logic,  │
+│                     │                            │ prompts, costs           │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ WORKFLOW DESIGN     │ 01, 03                     │ Step-by-step flow        │
+│                     │                            │ diagrams for each module │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ RULE-BASED SYSTEMS  │ 01                         │ What needs NO AI, pure   │
+│                     │                            │ rule-based logic         │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ TOKEN/USAGE CONTROL │ 04, 01                     │ Budget management, API   │
+│                     │                            │ keys, limits, alerts     │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ EXTERNAL SERVICES   │ 02, 03                     │ WhatsApp, Twilio, Stripe,│
+│                     │                            │ OpenAI, Resend, R2       │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ BILLING & PRICING   │ 02, 05                     │ 5-tier pricing, usage    │
+│                     │                            │ add-ons, Stripe setup    │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ SECURITY            │ 02                         │ Multi-tenant isolation,  │
+│                     │                            │ RLS, audit logging       │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ BACKUP/RESTORE      │ 02                         │ Per-tenant backup, 90-day│
+│                     │                            │ retention, point-in-time │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ DEPLOYMENT          │ 02                         │ Docker, low-spec native, │
+│                     │                            │ scaling to 10K customers │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ COST ANALYSIS       │ 01, 02, 03, 05             │ Cost per customer,       │
+│                     │                            │ per module, per API call │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ SALES STRATEGY      │ 05                         │ Target personas, pitch,  │
+│                     │                            │ objection handling       │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ MARKETING STRATEGY  │ 05                         │ 6 channels, funnel math, │
+│                     │                            │ content calendar         │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ LAUNCH PLAN         │ 05                         │ First 100 customers in   │
+│                     │                            │ 6 months, phase by phase │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ REVENUE PROJECTIONS │ 05                         │ Conservative + aggressive│
+│                     │                            │ scenarios (12 months)    │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ BUILD SCHEDULE      │ 01, 03                     │ 4-week plan, day by day, │
+│                     │                            │ file by file             │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ COMPETITIVE ANALYSIS│ 03, 05                     │ HubSpot, Zoho, Pipedrive │
+│                     │                            │ comparison tables        │
+├─────────────────────┼────────────────────────────┼──────────────────────────┤
+│ RISK ASSESSMENT     │ 03                         │ 9 risks with mitigation  │
+│                     │                            │ strategies               │
+└─────────────────────┴────────────────────────────┴──────────────────────────┘
+
+================================================================================
+ QUICK REFERENCE — KEY NUMBERS
+================================================================================
+
+EXISTING SYSTEM (Already Built):
+  API Routes:          149
+  Page Components:      72
+  Library Files:        51
+  UI Components:        54
+  Database Tables:      83
+  Worker Processes:      1
+  Total Files:         391
+
+WHAT WE'RE ADDING:
+  New API Routes:       16 (6 with AI, 4 partial, 6 rule-based)
+  New UI Pages:          9
+  New Components:       17
+  New Library Files:     7
+  New Worker Queues:     6
+  New Database Tables:   7
+  Total New Files:      53
+
+EXISTING FILES TO MODIFY:
+  API Routes:            4 (enhance, not replace)
+  UI Pages:              4 (add features)
+  Components:            4 (add badges/indicators)
+
+DATABASE CHANGES:
+  New Tables:            7
+  Modified Tables:       0 (all use metadata JSONB)
+  Dropped Tables:        0
+
+COST PER CUSTOMER (Growth Plan):
+  AI APIs:              ₹256/month
+  WhatsApp:              ₹88/month
+  Infrastructure:        ₹20/month (shared)
+  Total Cost:           ₹364/month
+  Revenue:            ₹2,999/month
+  Profit:             ₹2,635/month
+  Margin:                88%
+
+PRICING TIERS:
+  Free:                  ₹0/month
+  Starter:             ₹999/month
+  Growth:            ₹2,999/month  ← SWEET SPOT
+  Pro:               ₹5,999/month
+  Enterprise:       ₹14,999/month
+
+REVENUE PROJECTIONS (Conservative):
+  Month 1:     5 customers  → ₹10,000 MRR
+  Month 3:    25 customers  → ₹62,500 MRR
+  Month 6:    85 customers  → ₹2,38,000 MRR
+  Month 12:  300 customers  → ₹10,50,000 MRR
+
+BUILD SCHEDULE:
+  Week 1:  Token Control + Lead Scoring + Revenue Agent
+  Week 2:  WhatsApp AI Agent
+  Week 3:  Proposals + Content + Revenue Gaps
+  Week 4:  Voice Agent + Usage Dashboard + Polish
+
+================================================================================
+ WHERE TO START (When Ready to Code)
+================================================================================
+
+  1. Apply pending migrations:
+     npx tsx scripts/push-db.mts
+     (applies 031_dynamic_schema_system.sql,
+              032_ai_modules.sql,
+              033_token_control.sql)
+
+  2. Follow: 01_COMPLETE_DESIGN_PLAN_PAPER.txt → Section 10
+     (Day-by-day build plan starts there)
+
+  3. Each day's work is specified file-by-file in that document.
+
+================================================================================
+ DOCUMENT SIZES
+================================================================================
+
+  01_COMPLETE_DESIGN_PLAN_PAPER.txt      69 KB (MASTER PLAN — start here)
+  02_COMPLETE_TECHNICAL_BLUEPRINT.txt    79 KB (Architecture deep-dive)
+  03_AI_INTEGRATION_DETAILED_PLAN.txt    84 KB (AI research + execution)
+  04_TOKEN_CONTROL_SYSTEM.txt            42 KB (Token/budget management)
+  05_GO_TO_MARKET_COMPLETE_STRATEGY.txt  50 KB (Sales + marketing)
+
+  TOTAL: 324 KB of planning documentation
+
+================================================================================
+END OF MASTER INDEX
+================================================================================

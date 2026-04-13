@@ -1,0 +1,1361 @@
+================================================================================
+ NuCRM SaaS — COMPLETE DESIGN & PLAN ON PAPER
+ AI Modules Integrated Inside Existing CRM — NO DUPLICATION
+ Rule-Based for Repetitive Tasks, AI Only Where Required
+ NOTHING coded until this plan is approved
+================================================================================
+
+================================================================================
+ SECTION 1: WHAT WE HAVE — CURRENT SYSTEM AUDIT
+================================================================================
+
+BEFORE adding anything, here is EXACTLY what already exists:
+
+DATABASE — EXISTING TABLES (from migrations 001-033):
+═══════════════════════════════════════════════════════════════════════════════
+
+  CORE (18 tables — IMMUTABLE, never ALTER):
+    users, tenants, tenant_members, contacts, companies, deals, leads,
+    tasks, activities, subscriptions, roles, invitations, sessions,
+    webhooks, audit_logs, api_keys, tags, pipelines, notifications
+
+  EXTENSIONS (55+ tables — one per feature):
+    ai_insights, ai_email_drafts, contact_scores, ai_usage_logs,
+    workflows, workflow_actions, workflow_execution_logs, workflow_action_logs,
+    sequences, sequence_steps, sequence_enrollments, sequence_step_logs,
+    email_templates, saved_reports, report_executions, dashboards,
+    products, price_books, price_book_entries, quotes, quote_line_items,
+    call_recordings, call_notes, conversation_metrics, conversation_keywords,
+    churn_predictions, deal_forecasts, revenue_projections,
+    pipeline_health_metrics, impersonation_sessions,
+    contact_lifecycle_history, contact_merge_history,
+    webhook_deliveries, failed_webhooks,
+    automation_runs, billing_events, usage_snapshots,
+    modules, tenant_modules, forms, form_submissions,
+    meetings, file_attachments, email_log, email_tracking,
+    automations, automation_workflows, custom_field_defs,
+    permission_overrides, deal_products, sso_providers, sso_sessions,
+    field_permissions, record_permissions
+
+  BACKUP/RESTORE (4 tables — already built):
+    tenant_backup_records, tenant_restore_records, backup_schedules,
+    critical_data_backups
+
+  TOKEN CONTROL (6 tables — migration 033, NOT YET APPLIED):
+    token_budgets, tenant_token_limits, user_token_limits,
+    api_keys_registry, usage_alerts, cost_anomalies
+
+  DYNAMIC SCHEMA (migration 031 — NOT YET APPLIED):
+    feature_registry table
+    metadata JSONB column on all core tables
+    custom_field_defs (already exists, enhanced)
+
+TOTAL EXISTING TABLES: 83 + 6 (pending) = 89 tables
+
+API ROUTES — EXISTING (149 route.ts files):
+═══════════════════════════════════════════════════════════════════════════════
+
+  ALREADY EXISTS — DO NOT TOUCH:
+    ✓ /api/auth/*           (10 routes — login, signup, 2FA, etc.)
+    ✓ /api/tenant/contacts  (11 routes — CRUD, import, export, merge)
+    ✓ /api/tenant/deals     (2 routes — list, create, detail)
+    ✓ /api/tenant/companies (2 routes — CRUD)
+    ✓ /api/tenant/leads     (3 routes — list, detail, assign, convert)
+    ✓ /api/tenant/tasks     (2 routes — CRUD)
+    ✓ /api/tenant/activities(1 route — list, create)
+    ✓ /api/tenant/sequences (1 route — list, create)
+    ✓ /api/tenant/automations (2 routes — CRUD)
+    ✓ /api/tenant/notifications (1 route — list, mark read)
+    ✓ /api/tenant/email-templates (2 routes — CRUD)
+    ✓ /api/tenant/webhooks  (2 routes — CRUD, deliveries)
+    ✓ /api/tenant/integrations (3 routes — CRUD, connected)
+    ✓ /api/tenant/forms     (3 routes — CRUD, public submit)
+    ✓ /api/tenant/members   (1 route — team management)
+    ✓ /api/tenant/roles     (2 routes — CRUD)
+    ✓ /api/tenant/api-keys  (2 routes — CRUD)
+    ✓ /api/tenant/modules   (1 route — module management)
+    ✓ /api/tenant/pipelines (1 route — deal pipelines)
+    ✓ /api/tenant/meetings  (1 route — scheduling)
+    ✓ /api/tenant/calendar  (1 route — events)
+    ✓ /api/tenant/custom-fields (1 route — custom field defs)
+    ✓ /api/tenant/billing   (2 routes — Stripe checkout, portal)
+    ✓ /api/tenant/backup    (2 routes — history, config)
+    ✓ /api/tenant/export    (1 route — full data export)
+    ✓ /api/tenant/files     (1 route — upload, list)
+    ✓ /api/tenant/2fa       (3 routes — setup, verify, disable)
+    ✓ /api/tenant/dashboard/stats (1 route — dashboard data)
+    ✓ /api/tenant/analytics/churn (1 route — churn prediction)
+    ✓ /api/tenant/analytics/forecast (1 rule — forecasting)
+    ✓ /api/tenant/search    (1 route — global search)
+    ✓ /api/tenant/reports   (1 route — report generation)
+    ✓ /api/tenant/me        (1 route — current user info)
+    ✓ /api/tenant/usage-status (1 route — usage stats)
+
+  ALREADY EXISTS — AI ROUTES (4 routes — already built!):
+    ✓ /api/tenant/ai          → Claude AI: draft, score, predict
+    ✓ /api/tenant/ai/score    → AI lead scoring
+    ✓ /api/tenant/ai/insights → AI insights
+    ✓ /api/tenant/ai/email-draft → AI email generation
+
+  ALREADY EXISTS — SUPERADMIN ROUTES (17 routes):
+    ✓ /api/superadmin/tenants, /users, /stats, /health,
+      /monitoring, /announcements, /plans, /revenue, /impersonate,
+      /settings, /modules, /backups, /errors, /usage, /tickets, /me,
+      /data-explorer
+
+  ALREADY EXISTS — CRON ROUTES (9 routes):
+    ✓ /api/cron/backup, /auto-backup, /backup-health, /cleanup,
+      /process-sequences, /retry-webhooks, /task-reminders,
+      /trial-check, /usage-snapshot
+
+  ALREADY EXISTS — WEBHOOK ROUTES (3 routes):
+    ✓ /api/webhooks/resend, /webhooks/stripe, /webhooks/inbound
+
+  ALREADY EXISTS — PUBLIC ROUTES (9 routes):
+    ✓ /api/health, /keepalive, /metrics, /forms, /leads/public,
+      /setup/check, /setup/create-admin, /dev/dashboard, /test-email
+
+PAGE COMPONENTS — EXISTING (72 page.tsx files):
+═══════════════════════════════════════════════════════════════════════════════
+
+  ALREADY EXISTS — TENANT PAGES:
+    ✓ /tenant/dashboard       → CRM dashboard overview
+    ✓ /tenant/contacts        → Contact list
+    ✓ /tenant/contacts/[id]   → Contact detail
+    ✓ /tenant/leads           → Lead list
+    ✓ /tenant/leads/[id]      → Lead detail
+    ✓ /tenant/deals           → Deal pipeline
+    ✓ /tenant/companies       → Company list
+    ✓ /tenant/companies/[id]  → Company detail
+    ✓ /tenant/tasks           → Task list
+    ✓ /tenant/notifications   → Notification center
+    ✓ /tenant/analytics       → Analytics dashboard
+    ✓ /tenant/automation      → Automation builder
+    ✓ /tenant/automation/sequences → Sequences
+    ✓ /tenant/forms           → Form builder
+    ✓ /tenant/email-templates → Email template manager
+    ✓ /tenant/calendar        → Calendar view
+    ✓ /tenant/modules         → Module marketplace
+    ✓ /tenant/reports         → Reports generator
+    ✓ /tenant/search          → Global search
+    ✓ /tenant/trash           → Soft-deleted items
+    ✓ /tenant/trial-expired   → Trial expired
+    ✓ /tenant/settings/*      → 13 settings pages
+
+  ALREADY EXISTS — SUPERADMIN PAGES (16):
+    ✓ /superadmin/dashboard, /tenants, /users, /analytics,
+      /billing, /revenue, /monitoring, /health, /errors,
+      /modules, /announcements, /settings, /tickets, /usage,
+      /backups, /data-explorer, /token-control (NEW — just created)
+
+LIBRARY FILES — EXISTING (51 .ts files):
+═══════════════════════════════════════════════════════════════════════════════
+
+  ALREADY EXISTS:
+    ✓ lib/auth/*         (7 files — session, middleware, CSRF, API key, cron)
+    ✓ lib/db/*           (4 files — client, RLS, ensure-schema)
+    ✓ lib/cache/*        (4 files — Redis caching)
+    ✓ lib/email/*        (3 files — Resend/SMTP service)
+    ✓ lib/automation/*   (3 files — engine, workflows, types)
+    ✓ lib/queue/*        (1 file — BullMQ helpers)
+    ✓ lib/integrations/* (1 file — SDK helpers)
+    ✓ lib/webhooks.ts    (1 file — webhook firing)
+    ✓ lib/tenant/*       (3 files — context, import, export)
+    ✓ lib/ai/common.ts   (1 file — AI utilities — JUST CREATED)
+    ✓ lib/modules/*      (1 file — module registry)
+    ✓ lib/permissions/*  (1 file — permission definitions)
+    ✓ lib/utils.ts       (general utilities)
+    ✓ lib/validate.ts    (input validation)
+    ✓ lib/crypto.ts      (encryption)
+    ✓ lib/env.ts         (env parsing)
+    ✓ lib/errors.ts      (error logging)
+    ✓ lib/logger.ts      (structured logging)
+    ✓ lib/audit.ts       (audit writer)
+    ✓ lib/notifications.ts (notification creator)
+    ✓ lib/export.ts      (data export)
+    ✓ lib/rate-limit.ts  (rate limiting)
+    ✓ lib/critical-data-capture.ts (data preservation)
+
+COMPONENTS — EXISTING (54 files):
+═══════════════════════════════════════════════════════════════════════════════
+
+  ALREADY EXISTS:
+    ✓ components/ui/*        (11 files — button, input, card, table, etc.)
+    ✓ components/shared/*    (7 files — theme, command palette, etc.)
+    ✓ components/tenant/*    (30+ files — contacts, leads, deals, tasks, etc.)
+    ✓ components/superadmin/* (6 files — shell, sidebar, data tables)
+
+WORKER — EXISTING:
+═══════════════════════════════════════════════════════════════════════════════
+
+  ALREADY EXISTS:
+    ✓ worker.ts — BullMQ workers: email queue, webhook delivery,
+                   automation processing, sequence processing
+
+
+================================================================================
+ SECTION 2: THE PHILOSOPHY — RULE-BASED FIRST, AI ONLY WHERE REQUIRED
+================================================================================
+
+THE GOLDEN RULE:
+  Use RULES for repetitive, predictable tasks.
+  Use AI ONLY for tasks that need judgment, personalization, or creativity.
+
+WHAT IS RULE-BASED (NO AI NEEDED):
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✓ Follow-up scheduling (if deal stage = "proposal" → remind in 3 days)
+  ✓ Email sending (trigger template at scheduled time)
+  ✓ Task creation (when lead created → assign to salesperson)
+  ✓ Status updates (if email opened → change activity)
+  ✓ Tag assignment (if source = "website" → tag = "inbound")
+  ✓ Pipeline movement (if deal value > ₹1L → move to "priority" stage)
+  ✓ Notifications (if deal inactive 5 days → notify owner)
+  ✓ Data import/export (CSV parsing, field mapping)
+  ✓ Duplicate detection (same email + same name = possible duplicate)
+  ✓ Backup scheduling (every 30 days → trigger backup)
+  ✓ Trial expiry (if trial_ends_at < NOW() → downgrade)
+  ✓ Rate limiting (max 100 requests/hour → reject)
+  ✓ Usage tracking (count API calls → update meter)
+  ✓ Email sequence execution (step 1 sent → wait 3 days → send step 2)
+
+WHAT NEEDS AI (JUDGMENT REQUIRED):
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✓ Lead scoring (analyzing patterns, weighing factors — needs judgment)
+  ✓ WhatsApp replies (understanding intent, handling objections — needs NLP)
+  ✓ Follow-up EMAIL CONTENT (personalized message — needs creativity)
+  ✓ Proposal content generation (scope, executive summary — needs writing)
+  ✓ Content generation (posts, blogs, ad copy — needs creativity)
+  ✓ Voice call conversations (real-time understanding — needs speech AI)
+  ✓ Sentiment analysis (reading tone from text — needs NLP)
+  ✓ Revenue gap detection (pattern recognition across data — needs analysis)
+
+
+================================================================================
+ SECTION 3: WHAT TO ADD — MODULE BY MODULE (NO DUPLICATION)
+================================================================================
+
+For each module, I show:
+  • What ALREADY EXISTS that we reuse
+  • What is RULE-BASED (no AI)
+  • What is AI (only where needed)
+  • New database tables needed
+  • New API routes needed
+  • New UI pages needed
+  • New worker jobs needed
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 1: AI LEAD SCORING (Enhancement of existing /api/tenant/ai/score)
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ /api/tenant/ai/score route already exists
+  ✓ ai_insights table already exists (migration 018)
+  ✓ contact_scores table already exists (migration 018)
+  ✓ contacts.metadata JSONB column already exists (migration 031)
+  ✓ /tenant/contacts page already exists (shows contact list)
+  ✓ /tenant/contacts/[id] page already exists (shows contact detail)
+
+WHAT WE ADD:
+
+  RULE-BASED (no AI):
+    1. Score display badge on contact list (🔴 HOT / 🟡 WARM / 🔵 COLD)
+    2. Filter contacts by score range (UI component)
+    3. Sort contacts by score (UI component)
+    4. Auto-trigger scoring when contact is created/updated (rule)
+       Rule: When contact created or updated → add to scoring queue
+    5. Score expiry (rule): Re-score if last score > 24h old OR activity changed
+    6. Score history tracking (uses existing ai_insights table)
+
+  AI (only the scoring logic itself):
+    1. Call OpenAI to analyze contact + activities + deals → return score
+    2. AI suggests "next best action" string
+    3. AI estimates close probability and days
+
+  NEW DATABASE TABLES: NONE (uses existing ai_insights, contact_scores, metadata)
+
+  NEW API ROUTES:
+    ✗ /api/tenant/ai/score already exists → MODIFY to use new logic
+      Add: queue-based scoring (not synchronous)
+      Add: score factors in response (why scored this way)
+
+  NEW CRON ROUTES:
+    ✓ /api/cron/score-leads (NEW)
+      Rule-based: Runs every hour, finds contacts needing re-score,
+      adds them to BullMQ queue. The actual scoring uses AI.
+
+  NEW UI CHANGES:
+    ✓ Modify /tenant/contacts page:
+      - Add score column to contacts table
+      - Add score filter (range slider)
+      - Add score badge component (🔴/🟡/🔵)
+    ✓ Modify /tenant/contacts/[id] page:
+      - Add score card showing: score, factors, history chart
+      - Show "next best action" suggestion
+      - Add "Re-score now" button
+
+  NEW COMPONENTS:
+    ✓ components/ai/score-badge.tsx (HOT/WARM/COLD badge)
+    ✓ components/ai/score-factors.tsx (why scored this way)
+    ✓ components/ai/score-history.tsx (score over time chart)
+
+  NEW WORKER JOBS:
+    ✓ ai-scoring queue processor (in worker.ts)
+      - Picks up scoring jobs from BullMQ
+      - Calls OpenAI API
+      - Stores result in ai_insights + contacts.metadata
+      - Logs activity
+
+  COST PER SCORE: ₹0.003 (GPT-4o-mini)
+  USAGE TRACKING: Uses existing ai_usage_logs table
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 2: AI REVENUE AGENT (Automated Follow-up System)
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ /api/tenant/automations routes (CRUD automations)
+  ✓ /api/tenant/sequences routes (email sequences)
+  ✓ sequence engine (/api/cron/process-sequences)
+  ✓ automation engine (lib/automation/engine.ts)
+  ✓ email service (lib/email/service.ts)
+  ✓ email tracking (email_tracking table)
+  ✓ tasks table (for creating follow-up tasks)
+  ✓ activities table (for logging follow-ups)
+  ✓ worker.ts (BullMQ for background processing)
+  ✓ /api/tenant/email/test route (test email config)
+
+WHAT WE ADD:
+
+  RULE-BASED (NO AI — 80% of this module):
+    1. Follow-up SCHEDULING engine (rule-based)
+       Rule: If deal.stage = "proposal" AND no activity in 3 days
+             → create follow-up task
+    2. Follow-up TRIGGER engine (rule-based)
+       Rule: If contact.email_opened = true AND no reply in 48h
+             → trigger next follow-up
+    3. ESCALATION engine (rule-based)
+       Rule: If follow-up #3 sent AND no response in 48h
+             → create URGENT task for salesperson
+       Rule: If deal inactive 7 days
+             → notify deal owner
+    4. Follow-up HISTORY viewer (UI only)
+       Uses existing activities table (event_type = 'followup_sent')
+    5. Engagement TRACKING (rule-based)
+       Uses existing email_tracking table (open/click tracking already exists)
+
+  AI (only content generation — 20% of this module):
+    1. AI generates FOLLOW-UP EMAIL CONTENT
+       Input: contact info, deal info, previous follow-up history
+       Output: Personalized follow-up email text
+    2. AI generates FOLLOW-UP TIMING suggestion
+       Output: "Best time to follow up: Tuesday 10 AM"
+    3. AI generates NEXT BEST ACTION
+       Output: "Call now — they opened proposal 3 times"
+
+  NEW DATABASE TABLES: NONE (uses existing)
+    ✓ Uses: deals, contacts, tasks, activities, email_tracking
+    ✓ Uses: sequences, sequence_steps, sequence_enrollments (already exists)
+    ✓ Uses: automations, automation_workflows (already exists)
+
+  NEW API ROUTES:
+    ✗ /api/tenant/automations already exists → ENHANCE
+      Add pre-built follow-up templates
+    ✗ /api/tenant/followups (NEW — 1 route)
+      GET: list follow-up history for a deal/contact
+      POST: manually trigger follow-up now
+    ✓ /api/tenant/ai/followup-content (NEW — 1 route)
+      POST: AI generates follow-up email text
+
+  NEW CRON ROUTES:
+    ✓ /api/cron/follow-ups (NEW)
+      Rule-based: Every 30 minutes, scans for deals needing follow-up.
+      Uses existing automation engine to trigger follow-ups.
+      Uses AI only for content generation.
+
+  NEW UI CHANGES:
+    ✓ /tenant/deals page (modify):
+      - Add "Follow-up History" tab on deal detail
+      - Show next scheduled follow-up
+      - Show engagement metrics (opens, clicks)
+    ✓ /tenant/automation page (modify):
+      - Add "Revenue Agent" pre-built workflow template
+      - Configure: follow-up frequency, escalation rules
+    ✓ New: /tenant/ai/revenue-agent (1 page)
+      - Revenue Agent dashboard
+      - Follow-up performance metrics
+      - Settings: frequency, channels, escalation rules
+
+  NEW COMPONENTS:
+    ✓ components/ai/followup-timeline.tsx (follow-up history on deal)
+    ✓ components/ai/followup-settings.tsx (configure agent)
+
+  NEW WORKER JOBS:
+    ✓ follow-up queue processor (in worker.ts)
+      Rule-based: Checks deal status, creates tasks, sends emails
+      AI only: Generates email content when needed
+
+  COST PER FOLLOW-UP: ₹0.01 (AI content) + ₹0.001 (email) = ₹0.011
+  USAGE TRACKING: Uses existing ai_usage_logs + email_tracking
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 3: WHATSAPP AI CLOSER
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ /api/tenant/integrations routes (integration management)
+  ✓ /api/tenant/notifications routes (notification system)
+  ✓ activities table (for logging WhatsApp conversations)
+  ✓ contacts table with metadata JSONB (for storing WhatsApp number)
+  ✓ worker.ts (BullMQ for background message processing)
+
+WHAT WE ADD:
+
+  NEW DATABASE TABLES (3 new — these don't exist yet):
+    1. whatsapp_conversations (conversation threads per contact)
+    2. whatsapp_messages (individual messages)
+    3. ai_module_configs (per-tenant module settings — also used by other modules)
+
+  RULE-BASED (NO AI — 60% of this module):
+    1. Webhook HANDLER (rule-based)
+       Rule: POST from Meta → verify signature → parse message → store
+    2. Contact LOOKUP (rule-based)
+       Rule: Find contact by phone number in metadata
+    3. Message STORAGE (rule-based)
+       Store every inbound/outbound message in whatsapp_messages table
+    4. Conversation TRACKING (rule-based)
+       Track: message count, last message time, read receipts
+    5. RATE LIMITING (rule-based)
+       Rule: Max 80 messages/second (Meta limit) → queue if exceeded
+    6. OPT-IN MANAGEMENT (rule-based)
+       Track: who opted in/out of WhatsApp messages
+    7. MESSAGE TEMPLATE SELECTION (rule-based)
+       Rule: If within 24h service window → use free messages
+       Rule: If outside window → use paid template
+
+  AI (40% of this module):
+    1. AI generates REPLY CONTENT
+       Input: message text + contact context + deal context + conversation history
+       Output: Natural sales reply
+    2. AI detects INTENT
+       Output: "wants pricing" / "ready to buy" / "has objection" / "booking meeting"
+    3. AI handles VOICE NOTES (Whisper API — speech to text)
+    4. AI detects LANGUAGE (auto-respond in same language)
+
+  NEW API ROUTES:
+    ✓ /api/webhooks/whatsapp (NEW — 1 route)
+      POST: Meta webhook handler (rule-based parsing + AI reply trigger)
+    ✓ /api/tenant/whatsapp/messages (NEW — 1 route)
+      GET: List WhatsApp conversations for tenant
+    ✓ /api/tenant/whatsapp/conversations/[id] (NEW — 1 route)
+      GET: Get conversation thread
+      POST: Send message (manual override of AI)
+    ✓ /api/tenant/whatsapp/settings (NEW — 1 route)
+      GET/PUT: WhatsApp AI settings (enable/disable, language, tone)
+    ✓ /api/tenant/ai/whatsapp-reply (NEW — 1 route)
+      POST: AI generates WhatsApp reply
+
+  NEW UI PAGES:
+    ✓ /tenant/ai/whatsapp (NEW — 1 page)
+      WhatsApp AI Agent dashboard:
+      - Live conversation viewer
+      - AI settings (enable/disable, tone, language)
+      - Message history
+      - Usage stats
+
+  NEW COMPONENTS:
+    ✓ components/ai/whatsapp-chat-viewer.tsx (WhatsApp-style chat UI)
+    ✓ components/ai/whatsapp-settings.tsx (agent configuration)
+
+  NEW WORKER JOBS:
+    ✓ whatsapp-reply queue processor (in worker.ts)
+      Rule-based: Stores messages, tracks delivery
+      AI only: Generates reply content
+
+  COST PER CONVERSATION:
+    - AI reply: ₹0.30
+    - WhatsApp: FREE (within 24h service window)
+    - WhatsApp outbound: ₹0.70-2.00 (marketing template)
+    - Voice transcription: ₹0.50/min
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 4: AI PROPOSAL GENERATOR
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ quotes table (already exists — migration 023)
+  ✓ quote_line_items table (already exists)
+  ✓ products table (already exists)
+  ✓ price_books table (already exists)
+  ✓ contacts table (client info)
+  ✓ deals table (deal context)
+  ✓ email service (for sending proposals)
+  ✓ email tracking (for tracking proposal opens)
+
+WHAT WE ADD:
+
+  NEW DATABASE TABLES: NONE (uses existing quotes table)
+    ✓ Enhance: quotes table — add ai_generated BOOLEAN, ai_prompt TEXT columns
+      (These go in metadata JSONB — no ALTER TABLE needed)
+
+  RULE-BASED (NO AI — 50% of this module):
+    1. PDF RENDERING engine (rule-based)
+       Takes structured data → renders formatted PDF
+    2. Template SYSTEM (rule-based)
+       Pre-built proposal templates with placeholders
+    3. PRICING TABLE generator (rule-based)
+       Takes products/line items → renders pricing table
+    4. BRAND application (rule-based)
+       Applies tenant logo, colors, fonts to PDF
+    5. EMAIL SENDING (rule-based)
+       Attaches PDF → sends to contact → tracks opens
+    6. PROPOSAL STATUS tracking (rule-based)
+       Tracks: sent, opened, time spent, pages viewed
+
+  AI (50% of this module):
+    1. AI generates PROPOSAL CONTENT
+       Input: deal info, contact info, products, company branding
+       Output: Executive summary, scope of work, case study, terms
+    2. AI suggests RELEVANT CASE STUDY
+       Input: client industry, deal type
+       Output: Most relevant case study to include
+
+  NEW API ROUTES:
+    ✓ /api/tenant/ai/proposal (NEW — 1 route)
+      POST: Generate AI proposal content
+    ✗ /api/tenant/quotes already needs creation → ADD proposal generation
+
+  NEW UI PAGES:
+    ✓ /tenant/ai/proposals (NEW — 1 page)
+      Proposal generator:
+      - Select deal → click generate → preview → send
+      - Proposal history
+      - Template selector
+
+  NEW COMPONENTS:
+    ✓ components/ai/proposal-generator.tsx (form + preview)
+    ✓ components/ai/proposal-pdf-preview.tsx (PDF preview)
+
+  NEW WORKER JOBS:
+    ✓ proposal-generation queue (in worker.ts)
+      Rule-based: Renders PDF, sends email
+      AI only: Generates proposal content
+
+  COST PER PROPOSAL: ₹2-5 (AI content generation)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 5: AI CONTENT MACHINE
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ activities table (for logging content actions)
+  ✓ email_templates table (template system — can reuse for content templates)
+
+WHAT WE ADD:
+
+  NEW DATABASE TABLES (1 new):
+    1. content_generations (AI content creation history + scheduling)
+
+  RULE-BASED (NO AI — 40% of this module):
+    1. Content SCHEDULING (rule-based)
+       Rule: Publish at scheduled time → post to platform API
+    2. Content HISTORY viewer (UI only)
+       Shows: what was generated, when, status
+    3. Content CALENDAR (UI only)
+       Calendar view of scheduled content
+    4. Platform INTEGRATION (rule-based)
+       Post to LinkedIn, Twitter via their APIs
+
+  AI (60% of this module):
+    1. AI generates CONTENT
+       Input: topic, tone, audience, platform, length
+       Output: Platform-optimized content (post, blog, email, ad copy)
+    2. AI learns USER STYLE over time
+       Input: User's edited versions of AI content
+       Output: Adjusts future generations to match style
+
+  NEW API ROUTES:
+    ✓ /api/tenant/ai/content (NEW — 1 route)
+      POST: Generate content
+    ✓ /api/tenant/ai/content/scheduled (NEW — 1 route)
+      GET: List scheduled content
+      PUT: Update scheduled content
+
+  NEW UI PAGES:
+    ✓ /tenant/ai/content (NEW — 1 page)
+      Content Machine:
+      - Content type selector (post, blog, email, ad copy)
+      - Input prompt area
+      - Generated content editor
+      - Schedule/publish buttons
+      - Content calendar view
+
+  NEW COMPONENTS:
+    ✓ components/ai/content-generator.tsx (prompt + output + editor)
+    ✓ components/ai/content-calendar.tsx (calendar view)
+
+  NEW WORKER JOBS:
+    ✓ content-publishing queue (in worker.ts)
+      Rule-based: Publishes at scheduled time
+      AI only: Generates content
+
+  COST PER PIECE: ₹2-5 (GPT-4o for quality content)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 6: AI MISSED OPPORTUNITY DETECTOR
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ contacts table (with ai_score in metadata)
+  ✓ deals table (with follow-up data in metadata)
+  ✓ activities table (activity history)
+  ✓ notifications table (for sending alerts)
+  ✓ /api/cron/* routes (cron job system)
+
+WHAT WE ADD:
+
+  NEW DATABASE TABLES (1 new):
+    1. revenue_opportunities (missed revenue detections)
+
+  RULE-BASED (90% of this module — barely any AI needed):
+    1. STALE LEAD detection (pure SQL — NO AI):
+       Rule: ai_score > 80 AND last_activity > 3 days ago → opportunity
+    2. LOST DEAL recovery detection (pure SQL — NO AI):
+       Rule: stage = 'lost' AND updated_at > 30 days ago → recovery chance
+    3. INACTIVE CONTACT detection (pure SQL — NO AI):
+       Rule: no activity in 14 days AND lead_status = 'qualified' → opportunity
+    4. MISSED FOLLOW-UP detection (pure SQL — NO AI):
+       Rule: next_followup < NOW() - 2 days AND stage != 'won/lost' → alert
+    5. EXPIRED TRIAL detection (pure SQL — NO AI):
+       Rule: status = 'trial' AND trial_ends_at < NOW() - 7 days → alert
+    6. Daily REPORT generation (rule-based):
+       Compile all detections → send digest email/notification
+
+  AI (10% of this module):
+    1. AI estimates REVENUE IMPACT
+       Input: deal value, probability, days inactive
+       Output: Estimated lost revenue amount
+    2. AI generates RE-ENGAGEMENT MESSAGE
+       Input: contact info, why they went cold
+       Output: Personalized "let's reconnect" message
+
+  NEW API ROUTES:
+    ✓ /api/tenant/ai/opportunities (NEW — 1 route)
+      GET: List opportunities for tenant
+      PUT: Mark opportunity as acted_on/dismissed
+
+  NEW CRON ROUTES:
+    ✓ /api/cron/revenue-gaps (NEW)
+      Rule-based SQL scan → creates revenue_opportunity records
+      AI only: Estimates revenue impact, generates messages
+
+  NEW UI PAGES:
+    ✓ /tenant/ai/opportunities (NEW — 1 page)
+      Missed Opportunities dashboard:
+      - List of detected opportunities
+      - Estimated lost revenue
+      - One-click action (send re-engagement, create task)
+      - Dismiss button
+
+  NEW COMPONENTS:
+    ✓ components/ai/opportunity-card.tsx (opportunity display)
+    ✓ components/ai/opportunity-list.tsx (opportunity list)
+
+  NEW WORKER JOBS:
+    ✓ revenue-gap-detector (in worker.ts, triggered by cron)
+      Rule-based: SQL queries → detection → notification
+      AI only: Revenue estimation, message generation
+
+  COST: Negligible (mostly SQL queries)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 7: AI VOICE CALL AGENT
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ call_recordings table (already exists — migration 020)
+  ✓ call_notes table (already exists)
+  ✓ conversation_metrics table (already exists)
+  ✓ activities table (for logging calls)
+  ✓ tasks table (for creating follow-up tasks)
+
+WHAT WE ADD:
+
+  NEW DATABASE TABLES (1 new):
+    1. voice_calls (enhanced call records with AI data)
+
+  RULE-BASED (NO AI — 30% of this module):
+    1. Call SCHEDULING (rule-based)
+       Rule: Schedule call at specified time → queue for Vapi/Twilio
+    2. Call RECORDING storage (rule-based)
+       Save recording URL from webhook
+    3. FOLLOW-UP TASK creation (rule-based)
+       Rule: If call outcome = "interested" → create follow-up task
+    4. Call HISTORY viewer (UI only)
+       List of all calls with status, duration, recording link
+
+  AI (70% of this module):
+    1. AI conducts the PHONE CONVERSATION
+       This is the ONLY part that needs AI — everything else is rule-based
+    2. AI generates CALL SUMMARY
+    3. AI extracts ACTION ITEMS from transcript
+    4. AI analyzes SENTIMENT of call
+    5. AI updates LEAD SCORE based on call outcome
+
+  NEW API ROUTES:
+    ✓ /api/tenant/ai/voice (NEW — 1 route)
+      POST: Schedule AI voice call
+    ✓ /api/webhooks/voice (NEW — 1 route)
+      POST: Vapi/Twilio webhook (call completed, transcript ready)
+
+  NEW UI PAGES:
+    ✓ /tenant/ai/voice (NEW — 1 page)
+      Voice Agent:
+      - Schedule call form
+      - Call history with recordings
+      - Transcript viewer
+      - AI summary display
+
+  NEW COMPONENTS:
+    ✓ components/ai/voice-call-scheduler.tsx (schedule call form)
+    ✓ components/ai/voice-call-history.tsx (call list with recordings)
+    ✓ components/ai/voice-transcript-viewer.tsx (transcript + audio player)
+
+  NEW WORKER JOBS:
+    ✓ voice-call-processor (in worker.ts)
+      Rule-based: Schedules call via Vapi API, stores results
+      AI only: Actually conducts the conversation (handled by Vapi)
+
+  COST PER CALL: ₹5-25/min (Vapi.ai, 3 min avg = ₹15-75)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MODULE 8: TOKEN & USAGE CONTROL (Already designed — just needs UI completion)
+────────────────────────────────────────────────────────────────────────────────
+
+WHAT ALREADY EXISTS:
+  ✓ /api/superadmin/token-control page (just created)
+  ✓ Migration 033 (6 new tables — token_budgets, tenant_token_limits, etc.)
+  ✓ lib/ai/common.ts (token check + usage recording functions)
+  ✓ ai_usage_logs table (already exists from migration 018)
+  ✓ ai_usage_aggregated table (from migration 033)
+  ✓ ai_module_configs table (from migration 032)
+
+WHAT WE ADD:
+
+  NEW DATABASE TABLES: NONE (all 6 tables in migration 033)
+
+  RULE-BASED (95% of this module):
+    1. Budget ENFORCEMENT (pure logic — no AI)
+       Rule: If global budget > limit → block new calls
+    2. Usage TRACKING (counting — no AI)
+       Increment counters after each API call
+    3. Alert TRIGGERING (threshold comparison — no AI)
+       Rule: If usage > 80% of limit → send alert
+    4. Anomaly DETECTION (statistical — no AI)
+       Rule: If today's spend > 5x 7-day average → flag anomaly
+    5. API KEY rotation (cryptographic — no AI)
+       Generate new key, encrypt, store, activate
+    6. Report GENERATION (aggregation — no AI)
+       SUM/GROUP BY queries on usage tables
+
+  AI (0% of this module — completely rule-based):
+    No AI needed. This is pure accounting and enforcement.
+
+  NEW API ROUTES (need to create the actual route.ts file):
+    ✓ /api/superadmin/token-control (NEW — 1 route file with all sub-paths)
+      GET /budgets — list global budgets
+      PUT /budgets/:service — set budget
+      GET /tenants — list tenant usage
+      PUT /tenants/:id/limits — set tenant limits
+      GET /keys — list API keys
+      POST /keys — add API key
+      PUT /keys/:id — rotate/set primary
+      GET /alerts — list alerts
+      PUT /alerts/:id/acknowledge — acknowledge alert
+      GET /report — usage report
+      GET /report/export — CSV export
+
+  NEW UI PAGES:
+    ✓ /superadmin/token-control (ALREADY CREATED — just needs API backend)
+
+  NEW WORKER JOBS:
+    ✓ None needed (all real-time, no background processing)
+
+  COST: ₹0 (pure database operations)
+
+
+================================================================================
+ SECTION 4: COMPLETE DATABASE CHANGE SUMMARY
+================================================================================
+
+NEW TABLES NEEDED (7 total):
+═══════════════════════════════════════════════════════════════════════════════
+
+  Table                        | Used By Modules
+  ─────────────────────────────┼─────────────────────────────────────
+  whatsapp_conversations       | WhatsApp AI Closer
+  whatsapp_messages            | WhatsApp AI Closer
+  voice_calls                  | Voice Call Agent
+  content_generations          | Content Machine
+  revenue_opportunities        | Missed Opportunity Detector
+  ai_module_configs             | ALL AI modules (shared settings)
+  ai_usage_aggregated          | Token Control (billing)
+
+TABLES ALREADY EXISTING (reuse — no new tables needed):
+═══════════════════════════════════════════════════════════════════════════════
+
+  Existing Table               | Used By Which New Module
+  ─────────────────────────────┼─────────────────────────────────────
+  ai_insights                  | Lead Scoring (already exists)
+  contact_scores               | Lead Scoring (already exists)
+  contacts (metadata JSONB)    | ALL modules (store quick-access data)
+  deals (metadata JSONB)       | Revenue Agent (follow-up dates)
+  activities                   | ALL modules (log events)
+  tasks                        | Revenue Agent (create follow-up tasks)
+  email_tracking               | Revenue Agent (track opens/clicks)
+  quotes                       | Proposal Generator (already exists)
+  quote_line_items             | Proposal Generator (already exists)
+  products                     | Proposal Generator (already exists)
+  price_books                  | Proposal Generator (already exists)
+  call_recordings              | Voice Agent (already exists)
+  call_notes                   | Voice Agent (already exists)
+  conversation_metrics         | Voice Agent (already exists)
+  notifications                | ALL modules (send alerts)
+  sequences                    | Revenue Agent (already exists)
+  automations                  | Revenue Agent (already exists)
+  workflow_execution_logs      | Revenue Agent (already exists)
+  feature_registry             | ALL modules (self-registration)
+  token_budgets                | Token Control (migration 033)
+  tenant_token_limits          | Token Control (migration 033)
+  user_token_limits            | Token Control (migration 033)
+  api_keys_registry            | Token Control (migration 033)
+  usage_alerts                 | Token Control (migration 033)
+  cost_anomalies               | Token Control (migration 033)
+  ai_usage_logs                | ALL modules (detailed logging)
+
+NO TABLES ARE DROPPED. NO TABLES ARE ALTERED (except adding metadata JSONB
+which is already done in migration 031). Everything is ADDITIVE ONLY.
+
+
+================================================================================
+ SECTION 5: COMPLETE API ROUTE SUMMARY
+================================================================================
+
+NEW ROUTES TO CREATE (14 total):
+═══════════════════════════════════════════════════════════════════════════════
+
+  Route                                 | Module          | AI? 
+  ──────────────────────────────────────┼─────────────────┼─────
+  /api/cron/score-leads                 | Lead Scoring    | Yes
+  /api/cron/follow-ups                  | Revenue Agent   | Partial
+  /api/cron/revenue-gaps               | Missed Opp      | Partial
+  /api/tenant/ai/followup-content       | Revenue Agent   | Yes
+  /api/tenant/followups                 | Revenue Agent   | No
+  /api/webhooks/whatsapp               | WhatsApp AI     | Partial
+  /api/tenant/whatsapp/messages        | WhatsApp AI     | No
+  /api/tenant/whatsapp/conversations/[id]| WhatsApp AI   | No
+  /api/tenant/whatsapp/settings        | WhatsApp AI     | No
+  /api/tenant/ai/whatsapp-reply        | WhatsApp AI     | Yes
+  /api/tenant/ai/proposal              | Proposals       | Yes
+  /api/tenant/ai/content               | Content Machine | Yes
+  /api/tenant/ai/voice                 | Voice Agent     | No
+  /api/webhooks/voice                  | Voice Agent     | No
+  /api/tenant/ai/opportunities         | Missed Opp      | Partial
+  /api/superadmin/token-control         | Token Control   | No
+                                        │                 │
+  TOTAL NEW ROUTES: 16                  │                 │
+  Routes with AI: 6                     │                 │
+  Routes with partial AI: 4             │                 │
+  Pure rule-based routes: 6             │                 │
+
+
+================================================================================
+ SECTION 6: COMPLETE UI/UX CHANGE SUMMARY
+================================================================================
+
+NEW PAGES TO CREATE (9 total):
+═══════════════════════════════════════════════════════════════════════════════
+
+  Page                                    | Module
+  ────────────────────────────────────────┼─────────────────
+  /tenant/ai/lead-scoring                 | Lead Scoring
+  /tenant/ai/revenue-agent               | Revenue Agent
+  /tenant/ai/whatsapp                     | WhatsApp AI
+  /tenant/ai/proposals                    | Proposals
+  /tenant/ai/content                      | Content Machine
+  /tenant/ai/voice                        | Voice Agent
+  /tenant/ai/opportunities               | Missed Opportunity
+  /tenant/ai/usage                        | Usage Dashboard
+  /superadmin/token-control               | Token Control (CREATED)
+
+EXISTING PAGES TO MODIFY (4 total):
+═══════════════════════════════════════════════════════════════════════════════
+
+  Page                                    | Change
+  ────────────────────────────────────────┼────────────────────────────────
+  /tenant/contacts                        | Add score column, score filter,
+                                          │ score badges (🔴/🟡/🔵)
+  /tenant/contacts/[id]                   | Add score card, factors, history
+  /tenant/deals                           | Add follow-up history tab,
+                                          │ next follow-up display
+  /tenant/dashboard                        | Add AI insights widget
+
+NEW COMPONENTS TO CREATE (17 total):
+═══════════════════════════════════════════════════════════════════════════════
+
+  Component                               | Module
+  ────────────────────────────────────────┼─────────────────
+  components/ai/score-badge.tsx           | Lead Scoring
+  components/ai/score-factors.tsx         | Lead Scoring
+  components/ai/score-history.tsx         | Lead Scoring
+  components/ai/followup-timeline.tsx     | Revenue Agent
+  components/ai/followup-settings.tsx     | Revenue Agent
+  components/ai/whatsapp-chat-viewer.tsx  | WhatsApp AI
+  components/ai/whatsapp-settings.tsx     | WhatsApp AI
+  components/ai/proposal-generator.tsx    | Proposals
+  components/ai/proposal-pdf-preview.tsx  | Proposals
+  components/ai/content-generator.tsx     | Content Machine
+  components/ai/content-calendar.tsx      | Content Machine
+  components/ai/voice-call-scheduler.tsx  | Voice Agent
+  components/ai/voice-call-history.tsx    | Voice Agent
+  components/ai/voice-transcript-viewer.tsx| Voice Agent
+  components/ai/opportunity-card.tsx      | Missed Opportunity
+  components/ai/opportunity-list.tsx      | Missed Opportunity
+  components/ai/usage-meter.tsx           | Token Control
+
+EXISTING COMPONENTS TO MODIFY:
+═══════════════════════════════════════════════════════════════════════════════
+
+  Component                                    | Change
+  ─────────────────────────────────────────────┼────────────────────────────
+  components/tenant/contacts-client.tsx        | Add score column + filter
+  components/tenant/contacts-data-table.tsx    | Add score column
+  components/tenant/contact-detail-client.tsx  | Add score card
+  components/tenant/deals-client.tsx           | Add follow-up indicators
+  components/tenant/dashboard-client.tsx       | Add AI insights widget
+  components/tenant/automation/*                | Add Revenue Agent template
+
+
+================================================================================
+ SECTION 7: WORKER QUEUE SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+NEW QUEUE PROCESSORS TO ADD TO worker.ts:
+═══════════════════════════════════════════════════════════════════════════════
+
+  Queue Name              | Rule-Based? | AI Used? | Trigger
+  ────────────────────────┼─────────────┼──────────┼────────────────────────
+  ai-scoring              | Partial     | Yes      | Contact created/updated,
+                          │             │          │ or cron re-score
+  follow-up-execution     | Partial     | Yes      | Cron every 30 min
+  whatsapp-reply          | Partial     | Yes      | WhatsApp webhook
+  proposal-generation     | Partial     | Yes      | User triggers proposal
+  content-publishing      | Partial     | Yes      | User schedules content
+  revenue-gap-detection   | Yes         | Partial  | Cron daily at 6 AM
+                          │             │          │
+
+EXISTING QUEUES (keep as-is):
+  email-delivery         (already in worker.ts)
+  webhook-delivery       (already in worker.ts)
+  automation-processing  (already in worker.ts)
+  sequence-processing    (already in worker.ts via cron)
+
+
+================================================================================
+ SECTION 8: COMPLETE WORKFLOW DIAGRAMS
+================================================================================
+
+WORKFLOW 1: Contact Created → AI Scored → Follow-up Sent
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────┐
+  │ User creates  │
+  │ contact via   │
+  │ UI / API /    │
+  │ form / import │
+  └──────┬───────┘
+         │
+         │ INSERT INTO contacts (name, email, phone, tenant_id)
+         │ INSERT INTO activities (event_type='contact_created')
+         ▼
+  ┌──────────────────────┐
+  │ RULE: Contact created │
+  │ → Add to ai-scoring  │  ← RULE-BASED (queue addition)
+  │   queue (BullMQ)     │
+  └──────┬───────────────┘
+         │
+         ▼
+  ┌─────────────────────────┐
+  │ WORKER: ai-scoring      │
+  │ 1. Fetch contact data   │
+  │ 2. Fetch activities     │
+  │ 3. Build payload        │
+  └──────┬──────────────────┘
+         │
+         ▼
+  ┌─────────────────────────────────┐
+  │ AI: OpenAI gpt-4o-mini          │  ← ONLY AI STEP in this workflow
+  │ Input: contact + activities     │
+  │ Output: { score: 87,            │
+  │           sentiment: "positive", │
+  │           next_action: "call" }  │
+  └──────┬──────────────────────────┘
+         │
+         ▼
+  ┌──────────────────────────────┐
+  │ RULE: Store results          │
+  │ 1. ai_insights table         │  ← RULE-BASED
+  │ 2. contacts.metadata         │
+  │ 3. activities (ai_scored)    │
+  └──────┬───────────────────────┘
+         │
+         ├── IF score > 80 (HOT):
+         │    ├── RULE: Create URGENT task → tasks table
+         │    ├── RULE: Send notification → notifications table
+         │    └── IF Revenue Agent enabled:
+         │         └── Add to follow-up queue
+         │
+         └── IF score 50-79 (WARM):
+              └── RULE: Schedule follow-up in 3 days
+                  └── Add to follow-up queue with delay
+
+  ┌──────────────────────────────┐
+  │ WORKER: follow-up-execution  │
+  │ (30 min later or scheduled)  │
+  │ 1. Find contacts needing FU  │
+  │ 2. Check: has email?         │
+  │ 3. Generate email content:   │
+  └──────┬───────────────────────┘
+         │
+         ├── RULE-BASED: Use template if available
+         │               (no AI needed for standard follow-ups)
+         │
+         └── AI: Generate personalized content if no template
+                 (only for first-time or complex scenarios)
+                 ↓
+            ┌──────────────────┐
+            │ AI: gpt-4o-mini  │  ← AI STEP (optional)
+            │ Generate email   │
+            └──────┬───────────┘
+                   │
+                   ▼
+            ┌──────────────────┐
+            │ RULE: Send email │  ← RULE-BASED
+            │ via Resend API   │
+            │ Log: activities  │
+            │ Track: email     │
+            │       tracking   │
+            └──────────────────┘
+
+
+WORKFLOW 2: WhatsApp Message Received → AI Reply → Deal Updated
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────┐
+  │ Customer sends   │
+  │ WhatsApp message │
+  └──────┬───────────┘
+         │
+         │ Meta Cloud API → Webhook
+         ▼
+  ┌──────────────────────────────────┐
+  │ POST /api/webhooks/whatsapp      │
+  │ 1. Verify signature (rule)       │
+  │ 2. Parse message (rule)          │
+  │ 3. Find contact by phone (rule)  │
+  │ 4. Store message (rule)          │  ← ALL RULE-BASED
+  └──────┬───────────────────────────┘
+         │
+         ├── IF contact NOT found:
+         │    └── RULE: Create new contact (auto-enrich from WhatsApp profile)
+         │
+         └── IF contact found:
+              │
+              ▼
+       ┌──────────────────────────────┐
+       │ RULE: Check if AI enabled    │  ← RULE-BASED
+       │ for this tenant              │
+       └──────┬───────────────────────┘
+              │
+              ├── IF AI disabled:
+              │    └── RULE: Notify salesperson (notification)
+              │
+              └── IF AI enabled:
+                   │
+                   ▼
+            ┌─────────────────────────────────────┐
+            │ RULE: Gather context                │  ← RULE-BASED
+            │ 1. Last 10 messages in conversation │
+            │ 2. Contact's AI score               │
+            │ 3. Active deals                     │
+            │ 4. Previous interactions            │
+            └──────┬──────────────────────────────┘
+                   │
+                   ▼
+            ┌─────────────────────────────────────┐
+            │ AI: Generate reply                   │  ← ONLY AI STEP
+            │ System prompt: "You are sales agent  │
+            │ for {company}. Contact: {name}.      │
+            │ Score: {score}. Deal: {deal}.        │
+            │ Their message: {text}. Respond."     │
+            │                                      │
+            │ Output: natural sales reply          │
+            └──────┬───────────────────────────────┘
+                   │
+                   ▼
+            ┌─────────────────────────────────────┐
+            │ RULE: Send WhatsApp reply            │  ← RULE-BASED
+            │ 1. Store in whatsapp_messages        │
+            │ 2. Send via Meta API                │
+            │ 3. Update contacts.metadata          │
+            │ 4. Log activity                      │
+            └─────────────────────────────────────┘
+                   │
+                   └── IF AI detects intent to buy:
+                        └── RULE: Update deal stage
+                        └── RULE: Create task for salesperson
+                        └── RULE: Send notification to manager
+
+
+WORKFLOW 3: Daily Revenue Gap Scan (Pure Rule-Based with AI Assist)
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────┐
+  │ Cron: 6 AM daily │  ← TRIGGERED BY /api/cron/revenue-gaps
+  └──────┬───────────┘
+         │
+         ▼
+  ┌──────────────────────────────────┐
+  │ RULE 1: Find STALE HOT leads     │  ← PURE SQL, NO AI
+  │ SELECT contacts WHERE:           │
+  │   ai_score > 80                  │
+  │   AND last_activity > 3 days ago │
+  │   AND tenant_id = 'xxx'          │
+  └──────┬───────────────────────────┘
+         │
+         ├── For each result:
+         │    └── INSERT INTO revenue_opportunities (
+         │         opportunity_type = 'stale_lead',
+         │         estimated_value = avg_deal_value,
+         │         suggested_action = 'Send follow-up email',
+         │         status = 'new'
+         │       )
+         │
+  ┌──────────────────────────────────┐
+  │ RULE 2: Find LOST deals recoverable│ ← PURE SQL, NO AI
+  │ SELECT deals WHERE:              │
+  │   stage = 'lost'                 │
+  │   AND updated_at > 30 days ago   │
+  └──────┬───────────────────────────┘
+         │
+         ├── For each result:
+         │    └── INSERT INTO revenue_opportunities (
+         │         opportunity_type = 'lost_deal',
+         │         estimated_value = deal_value * 0.3,
+         │         suggested_action = 'Re-engage with new offer',
+         │         status = 'new'
+         │       )
+         │
+  ┌──────────────────────────────────┐
+  │ RULE 3: Find missed follow-ups   │ ← PURE SQL, NO AI
+  │ SELECT deals WHERE:              │
+  │   next_followup < NOW() - 2 days │
+  │   AND stage NOT IN ('won','lost')│
+  └──────┬───────────────────────────┘
+         │
+         ├── For each result:
+         │    └── INSERT INTO revenue_opportunities (...)
+         │
+  ┌──────────────────────────────────┐
+  │ RULE 4: Compile daily digest     │ ← PURE SQL + RULE-BASED
+  │ For each tenant:                 │
+  │   Count opportunities            │
+  │   Sum estimated lost revenue     │
+  │   Send notification/email        │
+  └──────────────────────────────────┘
+
+  AI is used ONLY when user clicks "Take Action" on an opportunity:
+    → AI generates personalized re-engagement message
+
+
+================================================================================
+ SECTION 9: EXACT COST BREAKDOWN PER CUSTOMER PER MONTH
+================================================================================
+
+ASSUMPTIONS (typical Growth plan customer — ₹2,999/month):
+═══════════════════════════════════════════════════════════════════════════════
+
+  500 contacts, 5 users, 50 deals/month
+
+  MODULE                   | CALLS/MO | COST/CALL  | TOTAL/MO
+  ─────────────────────────┼──────────┼────────────┼─────────
+  Lead Scoring             | 500      | ₹0.003     | ₹1.50
+  Revenue Agent (emails)   | 200      | ₹0.01      | ₹2.00
+  Revenue Agent (WhatsApp) | 100      | ₹0.30      | ₹30.00
+  WhatsApp AI replies      | 200      | ₹0.30      | ₹60.00
+  Content Machine          | 10       | ₹3.00      | ₹30.00
+  Proposals                | 3        | ₹4.00      | ₹12.00
+  Voice Calls              | 15 min   | ₹8.00/min  | ₹120.00
+  Revenue Gap Detection    | 30       | ₹0.01      | ₹0.30
+  Token Control            | 0        | ₹0         | ₹0
+  ─────────────────────────┼──────────┼────────────┼─────────
+  TOTAL AI COST:           |          |            | ₹255.80
+
+  WHATSAPP META CHARGES (separate from AI):
+    Marketing messages: 100 × ₹0.70 = ₹70
+    Utility messages: 50 × ₹0.35 = ₹17.50
+    Service messages: 150 × ₹0 = ₹0 (within 24h window)
+    WhatsApp total: ₹87.50
+
+  TOTAL EXTERNAL SERVICE COST: ₹255.80 + ₹87.50 = ₹343.30
+
+  CUSTOMER PAYS: ₹2,999/month
+  OUR COST: ₹343.30/month
+  PROFIT: ₹2,655.70/month per customer
+  MARGIN: 89%
+
+  AT 100 CUSTOMERS:
+    Revenue: ₹2,99,900/month
+    Cost: ₹34,330/month
+    Profit: ₹2,65,570/month
+
+
+================================================================================
+ SECTION 10: BUILD PRIORITY — WHAT TO CODE FIRST
+================================================================================
+
+PHASE 1: Foundation (Week 1) — NO AI, Pure Rule-Based
+═══════════════════════════════════════════════════════════════════════════════
+
+  Day 1: Apply pending migrations (031, 033)
+    → migrations/031_dynamic_schema_system.sql
+    → migrations/032_ai_modules.sql (7 new tables)
+    → migrations/033_token_control.sql (6 tables)
+
+  Day 2: Complete Token Control API
+    → Create /api/superadmin/token-control route.ts
+    → Connect to existing lib/ai/common.ts
+    → Test: set budget, check enforcement
+
+  Day 3: Lead Scoring Engine (AI part)
+    → Modify /api/tenant/ai/score route
+    → Build lib/ai-lead-scoring/scorer.ts
+    → Add ai-scoring queue to worker.ts
+
+  Day 4: Lead Scoring UI
+    → Modify /tenant/contacts page (add score column)
+    → Create components/ai/score-badge.tsx
+    → Modify /tenant/contacts/[id] (add score card)
+
+  Day 5: Revenue Agent — Rule-Based Engine
+    → Create /api/cron/follow-ups route
+    → Build lib/ai-revenue-agent/scheduler.ts (rule-based only)
+    → Add follow-up-execution queue to worker.ts
+    → Test: create deal → schedule follow-up → send email
+
+  Day 6-7: Testing
+    → Full end-to-end test: contact → score → follow-up → track
+    → Fix bugs
+    → Deploy to staging
+
+PHASE 2: WhatsApp AI (Week 2)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Day 8: Database + Webhook
+    → Apply migration 032 (whatsapp tables)
+    → Create /api/webhooks/whatsapp route
+    → Build lib/ai-whatsapp-agent/webhook.ts
+
+  Day 9-10: AI Reply Engine
+    → Build lib/ai-whatsapp-agent/agent.ts
+    → Create /api/tenant/ai/whatsapp-reply route
+    → Add whatsapp-reply queue to worker.ts
+
+  Day 11-12: WhatsApp UI
+    → Create /tenant/ai/whatsapp page
+    → Create components/ai/whatsapp-chat-viewer.tsx
+    → Create components/ai/whatsapp-settings.tsx
+
+  Day 13-14: Testing
+    → Test with real WhatsApp numbers
+    → Test voice note handling
+    → Test multi-language
+
+PHASE 3: Proposals + Content + Revenue Gaps (Week 3)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Day 15-16: Proposal Generator
+  Day 17-18: Content Machine
+  Day 19-20: Revenue Gap Detector
+  Day 21: Integration testing
+
+PHASE 4: Voice Agent + Usage Dashboard + Polish (Week 4)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Day 22-23: Voice Call Agent
+  Day 24: Usage Dashboard (/tenant/ai/usage)
+  Day 25: Feature gating by plan level
+  Day 26-27: End-to-end testing
+  Day 28: Launch preparation
+
+
+================================================================================
+ SECTION 11: SUMMARY — THE COMPLETE PLAN ON PAPER
+================================================================================
+
+WHAT EXISTS TODAY (391 files — ALL WORKING):
+  ✓ 149 API routes (auth, CRUD, AI, superadmin, cron, webhooks)
+  ✓ 72 page components (tenant, superadmin, auth, settings)
+  ✓ 51 library files (auth, db, cache, email, automation, AI)
+  ✓ 54 component files (UI primitives, tenant views, superadmin tables)
+  ✓ 1 worker file (BullMQ queues)
+  ✓ 39 scripts (seeds, migrations, deployment)
+  ✓ 25 migration files (83 tables)
+
+WHAT WE'RE ADDING (53 new files):
+  → 16 new API routes
+  → 9 new UI pages
+  → 17 new components
+  → 7 new library files
+  → 4 new worker queue processors
+
+WHAT WE'RE MODIFYING (12 existing files):
+  → 4 existing API routes (enhance)
+  → 4 existing pages (add AI features)
+  → 4 existing components (add score badges, follow-up indicators)
+
+DATABASE CHANGES:
+  → 7 new tables (whatsapp_conversations, whatsapp_messages, voice_calls,
+    content_generations, revenue_opportunities, ai_module_configs,
+    ai_usage_aggregated)
+  → 0 modifications to existing tables (all use metadata JSONB)
+  → 0 deletions of existing tables
+  → 3 pending migrations to apply (031, 032, 033)
+
+AI vs RULE-BASED BREAKDOWN:
+  → Total modules: 8
+  → Pure rule-based: 3 (Token Control, Revenue Agent scheduler, Gap Detector)
+  → Rule-based + AI: 5 (Lead Scoring, WhatsApp, Proposals, Content, Voice)
+  → AI API calls per month (per customer): ~1,000
+  → AI cost per customer: ₹256/month
+  → Total cost per customer: ₹343/month
+  → Revenue per customer: ₹2,999/month
+  → Margin: 89%
+
+NO DUPLICATION:
+  → Every new module REUSES existing tables, routes, components
+  → No existing code is rewritten
+  → All additions are purely additive
+  → metadata JSONB eliminates need for ALTER TABLE on core tables
+
+================================================================================
+END OF COMPLETE DESIGN PLAN ON PAPER
+================================================================================

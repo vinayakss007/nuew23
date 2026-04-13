@@ -1,0 +1,708 @@
+================================================================================
+ NuCRM SaaS — SUPERADMIN TOKEN & USAGE CONTROL SYSTEM
+ Complete System for Managing AI Tokens, API Keys, Rate Limits, and Costs
+ Per Tenant, Per User, Per Module
+================================================================================
+
+WHAT THIS SOLVES:
+  Without token control, one customer can:
+  - Burn through your entire OpenAI budget in a day
+  - Cost you more than they pay you
+  - Get your API key rate-limited (affecting ALL customers)
+  - Abuse AI features without limits
+
+THIS SYSTEM GIVES SUPERADMIN:
+  1. Global token budget (total OpenAI/WhatsApp/Twilio spend cap)
+  2. Per-tenant token limits (how much AI each customer can use)
+  3. Per-user limits within a tenant
+  4. Per-module limits (scoring, WhatsApp, voice, content separately)
+  5. Real-time usage dashboard (who's spending what)
+  6. Auto-suspend when limit hit
+  7. Cost alerts at 50%, 80%, 100% of budget
+  8. API key rotation
+  9. Usage anomaly detection (sudden spike = alert)
+  10. Billing reconciliation (what was charged vs what was used)
+
+
+================================================================================
+ PART A: DATABASE SCHEMA — Token & Usage Control Tables
+================================================================================
+
+These tables TRACK and CONTROL every AI token and API call across the platform.
+
+Already existing:
+  ✓ ai_usage_logs (individual API calls — detailed log)
+  ✓ ai_usage_aggregated (monthly totals per tenant per module)
+  ✓ ai_module_configs (per-tenant module settings + usage_stats)
+
+NEW TABLES NEEDED:
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ TABLE: token_budgets (GLOBAL — superadmin controls this)                │
+│ Purpose: Set platform-wide spending limits for each AI service          │
+├──────────────────────┬───────────┬──────────────────────────────────────┤
+│ Column               │ Type      │ Constraints                          │
+│ id                   │ UUID      │ PK, DEFAULT gen_random_uuid()        │
+│ service              │ TEXT      │ 'openai' | 'whatsapp' | 'twilio'    │
+│                      │           │   | 'vapi' | 'resend' | 'stripe'    │
+│ monthly_budget_cents │ BIGINT    │ max spend per month (in paise)       │
+│ current_month_cents  │ BIGINT    │ spent this month so far              │
+│ alert_at_50pct       │ BOOLEAN   │ DEFAULT true                         │
+│ alert_at_80pct       │ BOOLEAN   │ DEFAULT true                         │
+│ alert_at_100pct      │ BOOLEAN   │ DEFAULT true                         │
+│ hard_cap_enabled     │ BOOLEAN   │ DEFAULT true (stop when budget hit)  │
+│ soft_cap_enabled     │ BOOLEAN   │ DEFAULT true (alert but continue)    │
+│ billing_period       │ TEXT      │ '2026-04' format                     │
+│ reset_day            │ INT       │ day of month to reset (default: 1)   │
+│ created_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ updated_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ UNIQUE: (service, billing_period)                                       │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ TABLE: tenant_token_limits (per-tenant limits)                           │
+│ Purpose: Superadmin sets how much AI each tenant can use                │
+├──────────────────────┬───────────┬──────────────────────────────────────┤
+│ Column               │ Type      │ Constraints                          │
+│ id                   │ UUID      │ PK, DEFAULT gen_random_uuid()        │
+│ tenant_id            │ UUID      │ FK → tenants(id), UNIQUE             │
+│ openai_monthly_limit │ BIGINT    │ max tokens per month (-1 = unlimited)│
+│ whatsapp_monthly_msgs│ BIGINT    │ max WhatsApp messages (-1 = unlimited)│
+│ voice_monthly_mins   │ BIGINT    │ max voice minutes (-1 = unlimited)   │
+│ content_monthly_gen  │ BIGINT    │ max content generations (-1 = unlim) │
+│ proposal_monthly_gen │ BIGINT    │ max proposals (-1 = unlimited)       │
+│ followup_monthly_cnt │ BIGINT    │ max follow-ups (-1 = unlimited)      │
+│ score_monthly_cnt    │ BIGINT    │ max AI scores (-1 = unlimited)       │
+│ total_monthly_cost   │ BIGINT    │ max total cost in paise (-1 = unlim) │
+│ hard_cap_action      │ TEXT      │ 'block' | 'alert_only' | 'throttle'  │
+│ override_reason      │ TEXT      │ why limits were changed              │
+│ set_by               │ UUID      │ FK → users(id) (superadmin who set)  │
+│ created_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ updated_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ TABLE: user_token_limits (per-user limits within a tenant)               │
+│ Purpose: Restrict individual users (prevent one user from burning budget)│
+├──────────────────────┬───────────┬──────────────────────────────────────┤
+│ Column               │ Type      │ Constraints                          │
+│ id                   │ UUID      │ PK, DEFAULT gen_random_uuid()        │
+│ tenant_id            │ UUID      │ FK → tenants(id)                     │
+│ user_id              │ UUID      │ FK → users(id)                       │
+│ module               │ TEXT      │ which AI module                      │
+│ daily_limit          │ BIGINT    │ max calls per day (-1 = unlimited)   │
+│ monthly_limit        │ BIGINT    │ max calls per month (-1 = unlimited) │
+│ max_cost_per_call    │ BIGINT    │ max cost per single call (paise)     │
+│ created_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ UNIQUE: (tenant_id, user_id, module)                                    │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ TABLE: api_keys_registry (all external API keys tracked)                 │
+│ Purpose: Superadmin manages all API keys from one place                 │
+├──────────────────────┬───────────┬──────────────────────────────────────┤
+│ Column               │ Type      │ Constraints                          │
+│ id                   │ UUID      │ PK, DEFAULT gen_random_uuid()        │
+│ service              │ TEXT      │ 'openai' | 'whatsapp' | 'twilio'    │
+│                      │           │   | 'vapi' | 'resend'                │
+│ key_name             │ TEXT      │ human-readable name                  │
+│ encrypted_key        │ TEXT      │ encrypted API key value              │
+│ key_prefix           │ TEXT      │ first 8 chars for display (sk-xxx..) │
+│ is_active            │ BOOLEAN   │ DEFAULT true                         │
+│ is_primary           │ BOOLEAN   │ DEFAULT false (which key to use)     │
+│ monthly_budget_cents │ BIGINT    │ max spend on this key                │
+│ current_month_cents  │ BIGINT    │ spent so far                         │
+│ last_used_at         │ TIMESTAMPTZ│ when last used                      │
+│ expires_at           │ TIMESTAMPTZ│ key expiry date (if applicable)     │
+│ rate_limit_per_min   │ INT       │ requests per minute limit            │
+│ rate_limit_per_day   │ INT       │ requests per day limit               │
+│ notes                │ TEXT      │ admin notes                          │
+│ created_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ updated_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ created_by           │ UUID      │ FK → users(id)                       │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ TABLE: usage_alerts (alert history)                                      │
+│ Purpose: Track all budget alerts sent                                   │
+├──────────────────────┬───────────┬──────────────────────────────────────┤
+│ Column               │ Type      │ Constraints                          │
+│ id                   │ UUID      │ PK, DEFAULT gen_random_uuid()        │
+│ alert_type           │ TEXT      │ 'budget_50' | 'budget_80' |          │
+│                      │           │   'budget_100' | 'spike_detected' |  │
+│                      │           │   'tenant_limit_hit' | 'anomaly'     │
+│ target_type          │ TEXT      │ 'platform' | 'tenant' | 'user'       │
+│ target_id            │ UUID      │ tenant_id or user_id                 │
+│ service              │ TEXT      │ which service triggered alert        │
+│ current_value        │ BIGINT    │ current usage/cost                   │
+│ threshold_value      │ BIGINT    │ what threshold was hit               │
+│ message              │ TEXT      │ alert message sent                   │
+│ notification_sent    │ TEXT      │ 'email' | 'whatsapp' | 'in_app'      │
+│ acknowledged         │ BOOLEAN   │ DEFAULT false                        │
+│ acknowledged_by      │ UUID      │ who acknowledged                     │
+│ acknowledged_at      │ TIMESTAMPTZ│ when acknowledged                   │
+│ created_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+│ INDEX: (target_type, target_id, created_at DESC)                        │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ TABLE: cost_anomalies (usage spike detection)                            │
+│ Purpose: Detect unusual spending patterns                               │
+├──────────────────────┬───────────┬──────────────────────────────────────┤
+│ Column               │ Type      │ Constraints                          │
+│ id                   │ UUID      │ PK, DEFAULT gen_random_uuid()        │
+│ tenant_id            │ UUID      │ FK → tenants(id)                     │
+│ service              │ TEXT      │ which service had anomaly            │
+│ expected_daily_cents │ BIGINT    │ normal daily cost                    │
+│ actual_daily_cents   │ BIGINT    │ actual daily cost                    │
+│ deviation_pct        │ DECIMAL   │ % above normal                       │
+│ suspected_cause      │ TEXT      │ 'bulk_scoring' | 'loop' | 'attack'  │
+│                      │           │   | 'legitimate_spike'               │
+│ action_taken         │ TEXT      │ 'alerted' | 'throttled' | 'blocked'  │
+│ reviewed             │ BOOLEAN   │ DEFAULT false                        │
+│ reviewed_by          │ UUID      │ superadmin who reviewed              │
+│ created_at           │ TIMESTAMPTZ│ DEFAULT NOW()                       │
+└──────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+ PART B: HOW TOKEN CONTROL WORKS — STEP BY STEP
+================================================================================
+
+SCENARIO 1: Superadmin Sets Global OpenAI Budget
+═══════════════════════════════════════════════════════════════════════════════
+
+  Superadmin goes to: /superadmin/token-control
+
+  Sets:
+    OpenAI monthly budget: ₹10,000 (10,00,000 paise)
+    Alert at 50%: ✓
+    Alert at 80%: ✓
+    Hard cap at 100%: ✓ (stop all AI when budget exhausted)
+
+  System behavior:
+    - Every OpenAI API call → cost added to current_month_cents
+    - At ₹5,000 (50%) → send alert to superadmin
+    - At ₹8,000 (80%) → send alert, warn tenants
+    - At ₹10,000 (100%) → BLOCK all new OpenAI calls
+      → Return: "AI budget exhausted. Contact support or wait for next month."
+    - On 1st of next month → reset current_month_cents to 0
+
+
+SCENARIO 2: Superadmin Sets Per-Tenant Limits
+═══════════════════════════════════════════════════════════════════════════════
+
+  Superadmin sees: "Tenant ABC used 95% of their AI budget this month"
+
+  Goes to tenant detail → Sets limits:
+    AI scores/month: 1,000
+    WhatsApp msgs/month: 500
+    Voice mins/month: 30
+    Content pieces/month: 20
+    Total monthly cost: ₹5,000
+    Hard cap action: "block" (stop when limit hit)
+
+  System behavior:
+    - Every AI call → check tenant's remaining limit
+    - If tenant hits limit → block new calls, show upgrade prompt
+    - Tenant sees: "You've used 1000/1000 AI scores. Upgrade to continue."
+
+
+SCENARIO 3: Per-User Limits (Within a Tenant)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Tenant admin wants to prevent one salesperson from burning the budget.
+
+  Sets for user "Rahul":
+    AI scores/day: 50
+    WhatsApp msgs/day: 20
+    Max cost per call: ₹10
+
+  System behavior:
+    - Rahul scores 50 leads → hits daily limit
+    - 51st score → "Daily limit reached. Try tomorrow."
+    - Prevents one user from consuming the entire tenant budget
+
+
+SCENARIO 4: Anomaly Detection
+═══════════════════════════════════════════════════════════════════════════════
+
+  System monitors every tenant's daily spending.
+
+  Normal pattern: Tenant ABC spends ₹200/day on AI
+  Today: Tenant ABC spent ₹5,000 on AI
+
+  Anomaly detected:
+    - Deviation: 2400% above normal
+    - Cause analysis: "bulk_scoring" (scoring 500 contacts in 1 hour)
+    - Action: Send alert to superadmin, throttle to 10 requests/min
+    - Superadmin reviews: "Legitimate — they imported 500 new leads"
+    → Mark as reviewed, increase limit temporarily
+
+  If suspicious:
+    - Cause: "loop" (same request repeated 1000x)
+    - Action: BLOCK immediately, alert superadmin
+    - Possible API key leak or bug
+
+
+SCENARIO 5: API Key Rotation
+═══════════════════════════════════════════════════════════════════════════════
+
+  Superadmin needs to rotate an OpenAI key (security concern or rate limit).
+
+  1. Generate new OpenAI key
+  2. Add to api_keys_registry:
+     - service: 'openai'
+     - encrypted_key: [encrypted new key]
+     - is_active: true
+     - is_primary: false (not yet)
+  3. Test new key with a small request
+  4. Set new key as primary: is_primary = true
+  5. Set old key as inactive: is_active = false
+  6. System now uses new key for all requests
+  7. Old key kept for reference (can rollback)
+
+
+================================================================================
+ PART C: SUPERADMIN UI — Token Control Dashboard
+================================================================================
+
+Page: /superadmin/token-control
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🪙 Token & Usage Control                                                    │
+│                                                                             │
+│ ┌───────────────────┬──────────────────┬──────────────────┬───────────────┐ │
+│ │ OpenAI Budget     │ WhatsApp Budget  │ Voice Budget     │ Total Spent   │ │
+│ │ ₹7,234/₹10,000   │ ₹1,890/₹5,000   │ ₹340/₹2,000     │ ₹9,464        │ │
+│ │ [████████░░] 72%  │ [████░░░░░░] 38% │ [█░░░░░░░░░] 17%│ this month    │ │
+│ └───────────────────┴──────────────────┴──────────────────┴───────────────┘ │
+│                                                                             │
+│ ┌─── Quick Actions ─────────────────────────────────────────────────────┐  │
+│ │ [Set Global Budget] [Rotate API Key] [View Anomalies] [Export Report]│  │
+│ └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│ ┌─── Top Spending Tenants This Month ───────────────────────────────────┐  │
+│ │ Tenant          │ OpenAI   │ WhatsApp │ Voice │ Total  │ % of Budget │  │
+│ │ Acme Corp       │ ₹2,340   │ ₹890     │ ₹120  │ ₹3,350 │ 35%         │  │
+│ │ TechStart       │ ₹1,560   │ ₹450     │ ₹80   │ ₹2,090 │ 22%         │  │
+│ │ RealEstate Pro  │ ₹980     │ ₹340     │ ₹140  │ ₹1,460 │ 15%         │  │
+│ │ ... 47 more tenants                                                 │  │
+│ └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│ ┌─── Active API Keys ───────────────────────────────────────────────────┐  │
+│ │ Service   │ Key            │ Status  │ Spent    │ Rate Limit │ Actions │  │
+│ │ OpenAI    │ sk-proj-xxxx   │ ● Active│ ₹7,234   │ 10K/min    │ [Rotate]│  │
+│ │ OpenAI    │ sk-proj-yyyy   │ ○ Backup│ ₹0       │ 10K/min    │ [Delete]│  │
+│ │ WhatsApp  │ EAABwzL...     │ ● Active│ ₹1,890   │ 80/msg/sec │ [Rotate]│  │
+│ │ Twilio    │ ACxxxxxxxx     │ ● Active│ ₹340     │ —          │ [Rotate]│  │
+│ │ Vapi      │ vp_xxxxxx      │ ● Active│ ₹180     │ —          │ [Rotate]│  │
+│ │ Resend    │ re_xxxxxx      │ ● Active│ ₹45      │ —          │ [Rotate]│  │
+│ └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│ ┌─── Recent Alerts ─────────────────────────────────────────────────────┐  │
+│ │ Time     │ Tenant      │ Type          │ Details            │ Status   │  │
+│ │ 2h ago   │ Acme Corp   │ Tenant Limit  │ Hit 80% AI score   │ ⚠ Pending│  │
+│ │ 5h ago   │ TechStart   │ Spike Detected│ 500% above normal  │ ✓ Reviewed│ │
+│ │ 1d ago   │ Platform    │ Budget 80%    │ OpenAI at ₹8,000   │ ✓ Seen   │  │
+│ │ 2d ago   │ RealEstate  │ Budget Hit    │ Blocked new calls  │ ✓ Seen   │  │
+│ └──────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Per-Tenant Token Control:
+  /superadmin/token-control/tenants/{tenantId}
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │ Tenant: Acme Corp                                    [Edit Limits]      │
+  │ Plan: Growth (₹2,999/month)                                             │
+  │                                                                         │
+  │ ┌─── Current Usage This Month ────────────────────────────────────────┐ │
+  │ │ AI Scores:    847 / 1,000  [████████░░] 85%  ⚠️ Approaching limit  │ │
+  │ │ Follow-ups:   234 / 500    [████░░░░░░] 47%  ✓ OK                  │ │
+  │ │ WhatsApp msgs: 412 / 500    [████████░░] 82%  ⚠️ Approaching limit  │ │
+  │ │ Voice mins:    12 / 30      [███░░░░░░░] 40%  ✓ OK                  │ │
+  │ │ Content:        3 / 20      [░░░░░░░░░░] 15%  ✓ OK                  │ │
+  │ │ Proposals:      2 / 5       [███░░░░░░░] 40%  ✓ OK                  │ │
+  │ │                                                                     │ │
+  │ │ Total Cost: ₹2,847 / ₹5,000 budget  [█████░░░░░] 57%               │ │
+  │ └─────────────────────────────────────────────────────────────────────┘ │
+  │                                                                         │
+  │ ┌─── Set Limits ──────────────────────────────────────────────────────┐ │
+  │ │ AI Scores/month:     [1,000    ]                                    │ │
+  │ │ Follow-ups/month:    [500     ]                                     │ │
+  │ │ WhatsApp msgs/month: [500     ]                                     │ │
+  │ │ Voice mins/month:    [30      ]                                     │ │
+  │ │ Content pieces/mo:   [20      ]                                     │ │
+  │ │ Proposals/month:     [5       ]                                     │ │
+  │ │ Max monthly cost:    [₹5,000  ]                                     │ │
+  │ │ Hard cap action:     [Block when limit hit ▼]                       │ │
+  │ │                                     [Save Limits] [Reset to Plan]   │ │
+  │ └─────────────────────────────────────────────────────────────────────┘ │
+  │                                                                         │
+  │ ┌─── Per-User Limits ─────────────────────────────────────────────────┐ │
+  │ │ User           │ Daily AI Scores │ Daily WhatsApp │ Actions         │ │
+  │ │ john@acme.com  │ 50              │ 20             │ [Edit] [Remove] │ │
+  │ │ priya@acme.com │ 30              │ 10             │ [Edit] [Remove] │ │
+  │ │                                     [+ Add User Limit]               │ │
+  │ └─────────────────────────────────────────────────────────────────────┘ │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+ PART D: API — Token Control Endpoints
+================================================================================
+
+All endpoints require: Superadmin authentication
+
+GLOBAL BUDGET MANAGEMENT:
+  GET    /api/superadmin/token-control/budgets
+         → List all service budgets with current usage
+
+  PUT    /api/superadmin/token-control/budgets/{service}
+         → Set global budget for a service
+         Body: { monthly_budget_cents, alert_50, alert_80, hard_cap }
+
+  POST   /api/superadmin/token-control/budgets/reset
+         → Reset current month spending (manual override)
+         Body: { service }
+
+API KEY MANAGEMENT:
+  GET    /api/superadmin/token-control/keys
+         → List all API keys (masked, with usage)
+
+  POST   /api/superadmin/token-control/keys
+         → Add new API key
+         Body: { service, key, key_name, monthly_budget_cents }
+
+  PUT    /api/superadmin/token-control/keys/{id}
+         → Update key (set primary, toggle active, rotate)
+         Body: { is_primary, is_active }
+
+  DELETE /api/superadmin/token-control/keys/{id}
+         → Delete a key
+
+TENANT LIMIT MANAGEMENT:
+  GET    /api/superadmin/token-control/tenants
+         → List all tenants with usage vs limits
+
+  GET    /api/superadmin/token-control/tenants/{tenantId}
+         → Detailed usage for one tenant
+
+  PUT    /api/superadmin/token-control/tenants/{tenantId}/limits
+         → Set per-tenant limits
+         Body: { openai_monthly_limit, whatsapp_monthly_msgs, ... }
+
+  POST   /api/superadmin/token-control/tenants/{tenantId}/reset
+         → Reset tenant's usage counters
+         Body: { reason }
+
+USER LIMIT MANAGEMENT:
+  GET    /api/superadmin/token-control/users?tenantId=xxx
+         → List per-user limits for a tenant
+
+  PUT    /api/superadmin/token-control/users/{userId}/limits
+         → Set per-user limits
+         Body: { module, daily_limit, monthly_limit, max_cost_per_call }
+
+ALERTS & ANOMALIES:
+  GET    /api/superadmin/token-control/alerts
+         → List all alerts (with filters)
+
+  PUT    /api/superadmin/token-control/alerts/{id}/acknowledge
+         → Acknowledge an alert
+
+  GET    /api/superadmin/token-control/anomalies
+         → List detected anomalies
+
+  PUT    /api/superadmin/token-control/anomalies/{id}/review
+         → Mark anomaly as reviewed
+         Body: { action_taken, notes }
+
+REPORTING:
+  GET    /api/superadmin/token-control/report?period=2026-04
+         → Full usage report for a billing period
+
+  GET    /api/superadmin/token-control/report/export?format=csv
+         → Export usage data as CSV
+
+  GET    /api/superadmin/token-control/report/top-spenders
+         → Top 10 spending tenants
+
+
+================================================================================
+ PART E: HOW IT INTEGRATES INTO EXISTING AI MODULES
+================================================================================
+
+Every AI module call goes through a CHECK before making the actual API call:
+
+  // In lib/ai/common.ts — shared token check function
+  async function checkTokenAndLimits(tenantId, userId, module, estimatedCost) {
+    // 1. Check global budget
+    const globalBudget = await getGlobalBudget(module.service);
+    if (globalBudget.hard_cap_enabled &&
+        globalBudget.current_month_cents >= globalBudget.monthly_budget_cents) {
+      throw new Error('PLATFORM_BUDGET_EXHAUSTED');
+    }
+
+    // 2. Check tenant limits
+    const tenantLimits = await getTenantLimits(tenantId);
+    if (tenantLimits) {
+      const usage = await getCurrentUsage(tenantId, module.name);
+      if (usage.monthly_count >= tenantLimits.monthly_limit) {
+        throw new Error('TENANT_LIMIT_EXCEEDED');
+      }
+      if (tenantLimits.total_monthly_cost >= 0 &&
+          usage.monthly_cost_cents >= tenantLimits.total_monthly_cost) {
+        throw new Error('TENANT_COST_LIMIT_EXCEEDED');
+      }
+    }
+
+    // 3. Check user limits
+    const userLimits = await getUserLimits(tenantId, userId, module.name);
+    if (userLimits) {
+      const dailyUsage = await getDailyUsage(tenantId, userId, module.name);
+      if (dailyUsage.count >= userLimits.daily_limit) {
+        throw new Error('USER_DAILY_LIMIT_EXCEEDED');
+      }
+      if (estimatedCost > userLimits.max_cost_per_call) {
+        throw new Error('CALL_TOO_EXPENSIVE');
+      }
+    }
+
+    // 4. Check for anomalies
+    const anomaly = await checkForAnomaly(tenantId, module.service, estimatedCost);
+    if (anomaly) {
+      // Throttle or block based on anomaly severity
+      await applyAnomalyAction(anomaly);
+    }
+
+    // All checks passed — proceed with API call
+    return { allowed: true };
+  }
+
+  // After API call — record usage
+  async function recordUsage(tenantId, userId, module, costCents, tokensUsed) {
+    // Update global budget
+    await incrementGlobalBudget(module.service, costCents);
+
+    // Update tenant usage
+    await incrementTenantUsage(tenantId, module.name, costCents, tokensUsed);
+
+    // Update user usage
+    await incrementUserUsage(tenantId, userId, module.name, costCents);
+
+    // Check if any thresholds were crossed
+    await checkThresholdAlerts(tenantId, module.service);
+
+    // Log individual call
+    await logAICall(tenantId, userId, module, costCents, tokensUsed);
+  }
+
+Every AI module wraps its API call:
+
+  // Before:
+  const response = await openai.chat.completions.create({ ... });
+
+  // After:
+  await checkTokenAndLimits(tenantId, userId, 'lead_scoring', estimatedCost);
+  const response = await openai.chat.completions.create({ ... });
+  await recordUsage(tenantId, userId, 'lead_scoring', actualCost, tokensUsed);
+
+
+================================================================================
+ PART F: MIGRATION — New Tables SQL
+================================================================================
+
+SQL for migration 033 (add to migrations/033_token_control.sql):
+
+```sql
+-- Token & Usage Control Tables for Superadmin
+-- Migration 033
+
+-- Global service budgets
+CREATE TABLE IF NOT EXISTS token_budgets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  service TEXT NOT NULL,
+  monthly_budget_cents BIGINT NOT NULL DEFAULT 0,
+  current_month_cents BIGINT NOT NULL DEFAULT 0,
+  alert_at_50pct BOOLEAN DEFAULT true,
+  alert_at_80pct BOOLEAN DEFAULT true,
+  alert_at_100pct BOOLEAN DEFAULT true,
+  hard_cap_enabled BOOLEAN DEFAULT true,
+  soft_cap_enabled BOOLEAN DEFAULT true,
+  billing_period TEXT NOT NULL DEFAULT TO_CHAR(NOW(), 'YYYY-MM'),
+  reset_day INT DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(service, billing_period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_budgets_service ON token_budgets(service, billing_period);
+
+-- Per-tenant token limits
+CREATE TABLE IF NOT EXISTS tenant_token_limits (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  openai_monthly_limit BIGINT DEFAULT -1,
+  whatsapp_monthly_msgs BIGINT DEFAULT -1,
+  voice_monthly_mins BIGINT DEFAULT -1,
+  content_monthly_gen BIGINT DEFAULT -1,
+  proposal_monthly_gen BIGINT DEFAULT -1,
+  followup_monthly_cnt BIGINT DEFAULT -1,
+  score_monthly_cnt BIGINT DEFAULT -1,
+  total_monthly_cost BIGINT DEFAULT -1,
+  hard_cap_action TEXT DEFAULT 'block',
+  override_reason TEXT,
+  set_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id)
+);
+
+-- Per-user token limits
+CREATE TABLE IF NOT EXISTS user_token_limits (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module TEXT NOT NULL,
+  daily_limit BIGINT DEFAULT -1,
+  monthly_limit BIGINT DEFAULT -1,
+  max_cost_per_call BIGINT DEFAULT -1,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, user_id, module)
+);
+
+-- API keys registry
+CREATE TABLE IF NOT EXISTS api_keys_registry (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  service TEXT NOT NULL,
+  key_name TEXT NOT NULL,
+  encrypted_key TEXT NOT NULL,
+  key_prefix TEXT,
+  is_active BOOLEAN DEFAULT true,
+  is_primary BOOLEAN DEFAULT false,
+  monthly_budget_cents BIGINT DEFAULT -1,
+  current_month_cents BIGINT DEFAULT 0,
+  last_used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  rate_limit_per_min INT,
+  rate_limit_per_day INT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_by UUID REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_service ON api_keys_registry(service, is_active);
+CREATE INDEX IF NOT EXISTS idx_api_keys_primary ON api_keys_registry(service, is_primary) WHERE is_primary = true;
+
+-- Usage alerts
+CREATE TABLE IF NOT EXISTS usage_alerts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_type TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id UUID,
+  service TEXT,
+  current_value BIGINT,
+  threshold_value BIGINT,
+  message TEXT,
+  notification_sent TEXT,
+  acknowledged BOOLEAN DEFAULT false,
+  acknowledged_by UUID REFERENCES users(id),
+  acknowledged_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_alerts_target ON usage_alerts(target_type, target_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_alerts_unacked ON usage_alerts(acknowledged) WHERE acknowledged = false;
+
+-- Cost anomalies
+CREATE TABLE IF NOT EXISTS cost_anomalies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  service TEXT NOT NULL,
+  expected_daily_cents BIGINT,
+  actual_daily_cents BIGINT,
+  deviation_pct DECIMAL(10,2),
+  suspected_cause TEXT,
+  action_taken TEXT,
+  reviewed BOOLEAN DEFAULT false,
+  reviewed_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_anomalies_tenant ON cost_anomalies(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cost_anomalies_unreviewed ON cost_anomalies(reviewed) WHERE reviewed = false;
+
+-- Insert default global budgets
+INSERT INTO token_budgets (service, monthly_budget_cents, billing_period) VALUES
+  ('openai', 1000000, TO_CHAR(NOW(), 'YYYY-MM')),     -- ₹10,000
+  ('whatsapp', 500000, TO_CHAR(NOW(), 'YYYY-MM')),    -- ₹5,000
+  ('twilio', 200000, TO_CHAR(NOW(), 'YYYY-MM')),      -- ₹2,000
+  ('vapi', 200000, TO_CHAR(NOW(), 'YYYY-MM')),        -- ₹2,000
+  ('resend', 10000, TO_CHAR(NOW(), 'YYYY-MM'))        -- ₹100
+ON CONFLICT (service, billing_period) DO NOTHING;
+
+COMMENT ON TABLE token_budgets IS 'Global spending limits per AI service per month';
+COMMENT ON TABLE tenant_token_limits IS 'Per-tenant AI usage limits set by superadmin';
+COMMENT ON TABLE user_token_limits IS 'Per-user AI usage limits within a tenant';
+COMMENT ON TABLE api_keys_registry IS 'Registry of all external API keys with usage tracking';
+COMMENT ON TABLE usage_alerts IS 'Budget and limit alert history';
+COMMENT ON TABLE cost_anomalies IS 'Detected unusual spending patterns';
+```
+
+
+================================================================================
+ PART G: COST CALCULATION — How Much Each AI Call Costs
+================================================================================
+
+EXACT COST CALCULATION (for accurate tracking):
+
+  OpenAI (per API call):
+    Input tokens:  prompt_text_length / 4 (rough estimate) × ₹0.000012/token
+    Output tokens: response_length / 4 × ₹0.000050/token
+    Total: (input_tokens × ₹0.000012) + (output_tokens × ₹0.000050)
+    In paise: total × 100
+
+  WhatsApp (per message):
+    Marketing: ₹0.70-2.00 = 70-200 paise
+    Utility: ₹0.35-1.00 = 35-100 paise
+    Service: FREE (within 24h window)
+
+  Voice (per minute):
+    Vapi.ai: ₹5-10/min = 500-1000 paise/min
+    Twilio: ₹1.40/min = 140 paise/min
+    OpenAI Realtime: ₹5/min = 500 paise/min
+
+  Resend (per email):
+    Free tier: 3,000/month = 0 paise
+    After: ₹0.80/1000 = 0.08 paise/email (essentially free)
+
+  Stripe (per transaction):
+    2% + ₹3 = 200 paise per ₹100 + 300 paise fixed
+
+
+================================================================================
+ PART H: IMPLEMENTATION ORDER
+================================================================================
+
+  DAY 1: Create migration 033 (all 6 tables)
+  DAY 2: Build API key registry + encryption helper
+  DAY 3: Build global budget checker + enforcer
+  DAY 4: Build tenant limit checker + enforcer
+  DAY 5: Build per-user limit checker
+  DAY 6: Integrate checkTokenAndLimits() into all AI modules
+  DAY 7: Build anomaly detection (simple threshold-based)
+  DAY 8: Build alert system (email + in-app notifications)
+  DAY 9: Build Superadmin UI — global budget page
+  DAY 10: Build Superadmin UI — per-tenant limits page
+  DAY 11: Build Superadmin UI — API keys management page
+  DAY 12: Build Superadmin UI — alerts + anomalies page
+  DAY 13: Build usage reporting + CSV export
+  DAY 14: Testing — simulate budget exhaustion, limit hitting, anomaly detection
+
+  Total: 2 weeks for complete token control system
+
+================================================================================
+END OF TOKEN CONTROL SYSTEM DOCUMENT
+================================================================================

@@ -1,0 +1,2058 @@
+================================================================================
+ NuCRM SaaS — COMPLETE TECHNICAL BLUEPRINT
+ AI-Powered CRM Platform with All Modules Integrated Inside ONE App
+================================================================================
+
+This document explains EXACTLY how everything works:
+  • Database architecture (core + AI modules)
+  • How each AI module stores and reads data
+  • How the dynamic schema eliminates migrations forever
+  • How WhatsApp, Twilio, Stripe, AI APIs connect
+  • How billing gates features by plan
+  • How data flows between every module
+  • How money is made (cost + pricing breakdown)
+  • How the system scales
+  • Security and data protection
+  • Step-by-step build order
+
+================================================================================
+ TABLE OF CONTENTS
+================================================================================
+
+PART 1: DATABASE ARCHITECTURE
+  1.1  Core Tables (Immutable — Never Change)
+  1.2  The metadata JSONB Column (Dynamic Fields — Zero Migrations)
+  1.3  Extension Tables (Each Feature Gets Its Own Tables)
+  1.4  How AI Modules Store Data (No ALTER TABLE Ever)
+  1.5  Data Flow: What Happens When a Lead Enters the System
+  1.6  Complete Table List with Purpose and Relationships
+
+PART 2: AI MODULES — HOW EACH ONE WORKS
+  2.1  AI Lead Scoring (HOT/WARM/COLD)
+  2.2  AI Revenue Agent (Follow-up Automation)
+  2.3  WhatsApp AI Closer
+  2.4  AI Content Machine
+  2.5  AI Call Agent (Voice AI)
+  2.6  AI Proposal Generator
+  2.7  AI Missed Opportunity Detector
+  2.8  AI Growth Agent (Combined Module)
+
+PART 3: INTEGRATIONS — HOW EXTERNAL SERVICES CONNECT
+  3.1  WhatsApp Business API
+  3.2  Twilio (Voice Calls)
+  3.3  Stripe (Billing/Payments)
+  3.4  OpenAI / AI Provider
+  3.5  Email (Resend / SMTP)
+  3.6  Redis (Caching + Queues)
+  3.7  S3 / R2 (File Storage + Backups)
+
+PART 4: BILLING & FEATURE GATING
+  4.1  How Plans Control Access to Modules
+  4.2  Pay-As-You-Go Add-ons
+  4.3  Usage Tracking and Billing Calculation
+
+PART 5: DATA FLOW — COMPLETE JOURNEY
+  5.1  Lead Enters System → Scored → Followed Up → Closed
+  5.2  WhatsApp Conversation Flow
+  5.3  Voice Call Flow
+  5.4  Proposal Generation Flow
+
+PART 6: DYNAMIC SCHEMA — HOW NEW FEATURES ADD FIELDS WITHOUT MIGRATIONS
+  6.1  The JSONB metadata Pattern
+  6.2  Feature Registry System
+  6.3  Custom Fields (Tenant-Defined)
+  6.4  How to Add a New Module (Step-by-Step)
+
+PART 7: COST ARCHITECTURE — HOW MUCH EVERYTHING COSTS
+  7.1  Server Costs
+  7.2  AI API Costs
+  7.3  WhatsApp / Twilio Costs
+  7.4  Profit Margin Per Customer
+
+PART 8: SECURITY & DATA PROTECTION
+  8.1  Multi-Tenant Data Isolation
+  8.2  Backup & Restore System (90-Day Retention)
+  8.3  Audit Logging
+  8.4  Rate Limiting & Abuse Prevention
+
+PART 9: SCALING PLAN
+  9.1  1-100 Customers
+  9.2  100-1000 Customers
+  9.3  1000-10,000 Customers
+
+PART 10: BUILD ORDER — WHAT TO CODE FIRST
+  10.1  Week 1-2: MVP (Lead Scoring + Revenue Agent)
+  10.2  Week 3-4: WhatsApp AI Closer
+  10.3  Week 5-6: Proposals + Content Machine
+  10.4  Week 7-8: Voice Agent + Growth Agent
+
+
+================================================================================
+ PART 1: DATABASE ARCHITECTURE
+================================================================================
+
+--------------------------------------------------------------------------------
+ 1.1 Core Tables (Immutable — Never Change After Creation)
+--------------------------------------------------------------------------------
+
+These tables are the FOUNDATION. They are created ONCE by migration 001.
+After that, NO ALTER TABLE. NO DROP COLUMN. NO TYPE CHANGES. Ever.
+
+Table: users
+  Purpose: Every person who logs into the platform
+  Columns: id, email, password_hash, full_name, is_super_admin, 
+           email_verified, created_at, updated_at, last_login_at,
+           metadata (JSONB — for Telegram, preferences, etc.)
+  Never changes: The columns above are permanent.
+
+Table: tenants
+  Purpose: Each customer (business) gets one tenant row
+  Columns: id, name, subdomain, slug, status, plan, owner_id,
+           created_at, updated_at, trial_ends_at, status,
+           metadata (JSONB — for branding, custom_domain, settings)
+  Never changes: The columns above are permanent.
+
+Table: tenant_members
+  Purpose: Which users belong to which tenant
+  Columns: id, tenant_id, user_id, role, joined_at, created_at
+  Never changes.
+
+Table: contacts
+  Purpose: Every contact/lead/customer record
+  Columns: id, tenant_id, first_name, last_name, email, phone,
+           company_id, lead_status, assigned_to, created_at, updated_at,
+           deleted_at,
+           metadata (JSONB — AI scores, custom fields, social profiles, etc.)
+  Never changes: Core columns are permanent. metadata holds EVERYTHING new.
+
+Table: companies
+  Purpose: Business/organization records
+  Columns: id, tenant_id, name, industry, website, phone,
+           created_at, updated_at, deleted_at,
+           metadata (JSONB — custom fields, social links, etc.)
+  Never changes.
+
+Table: deals
+  Purpose: Sales opportunities (pipeline items)
+  Columns: id, tenant_id, title, value, stage, close_date,
+           contact_id, assigned_to, pipeline_id,
+           created_at, updated_at, deleted_at,
+           metadata (JSONB — probability, competitor info, next steps)
+  Never changes.
+
+Table: leads
+  Purpose: Raw/unqualified leads (before they become contacts)
+  Columns: id, tenant_id, name, email, phone, company, source,
+           status, value, assigned_to, created_at, updated_at, deleted_at,
+           metadata (JSONB — lead source detail, scoring, enrichment data)
+  Never changes.
+
+Table: tasks
+  Purpose: To-dos, reminders, follow-ups
+  Columns: id, tenant_id, title, description, due_date, priority,
+           completed, contact_id, deal_id, assigned_to,
+           created_at, updated_at, deleted_at,
+           metadata (JSONB — recurrence, reminders, AI suggestions)
+  Never changes.
+
+Table: activities
+  Purpose: Timeline of everything that happens (emails, calls, notes, changes)
+  Columns: id, tenant_id, user_id, contact_id, deal_id, company_id,
+           event_type, description, metadata (JSONB — full event details),
+           created_at
+  Never changes.
+
+Table: subscriptions
+  Purpose: Billing plan for each tenant
+  Columns: id, tenant_id, plan, status, stripe_customer_id,
+           stripe_subscription_id, current_period_start, current_period_end,
+           cancel_at_period_end, created_at, updated_at,
+           metadata (JSONB — usage data, overage tracking)
+  Never changes.
+
+Table: roles
+  Purpose: Permission roles within a tenant (admin, sales, viewer, etc.)
+  Columns: id, tenant_id, name, permissions (JSONB), created_at
+  Never changes.
+
+Table: invitations
+  Purpose: Team member invite tokens
+  Columns: id, tenant_id, email, role, token, expires_at, accepted_at,
+           created_at
+  Never changes.
+
+Table: sessions
+  Purpose: Active login sessions (JWT alternative)
+  Columns: id, user_id, token, expires_at, ip_address, user_agent, created_at
+  Never changes.
+
+Table: webhooks
+  Purpose: Outbound webhook endpoints (notify external systems)
+  Columns: id, tenant_id, url, events (JSONB), active, secret,
+           created_at, updated_at,
+           metadata (JSONB — retry config, headers)
+  Never changes.
+
+Table: audit_logs
+  Purpose: Who did what, when (compliance)
+  Columns: id, tenant_id, user_id, action, entity_type, entity_id,
+           metadata (JSONB — before/after values), ip_address, created_at,
+           impersonated_by (UUID — if admin was impersonating)
+  Never changes.
+
+TABLE: api_keys
+  Purpose: API access keys for integrations
+  Columns: id, tenant_id, name, key_hash, permissions (JSONB),
+           last_used_at, expires_at, created_at,
+           metadata (JSONB — rate limit, IP whitelist)
+  Never changes.
+
+Table: tags
+  Purpose: Tags for organizing contacts/deals
+  Columns: id, tenant_id, name, color, created_at,
+           metadata (JSONB — auto-tag rules)
+  Never changes.
+
+Table: pipelines
+  Purpose: Sales pipeline definitions (stages)
+  Columns: id, tenant_id, name, stages (JSONB), created_at, updated_at,
+           metadata (JSONB — default values, automation rules)
+  Never changes.
+
+Table: notifications
+  Purpose: In-app notifications
+  Columns: id, tenant_id, user_id, title, message, type, read_at,
+           created_at,
+           metadata (JSONB — action links, deep links)
+  Never changes.
+
+Total Core Tables: 18
+All have metadata JSONB column.
+None will ever be ALTERed again.
+
+--------------------------------------------------------------------------------
+ 1.2 The metadata JSONB Column (Dynamic Fields — Zero Migrations)
+--------------------------------------------------------------------------------
+
+This is THE KEY to everything.
+
+Every core table has ONE extra column:
+
+  metadata JSONB DEFAULT '{}'::jsonb
+
+This column stores ANY feature's data without needing a new column.
+
+Example — AI Lead Scoring stores its data in contacts.metadata:
+
+  Before AI:
+    contacts.metadata = {}
+
+  After AI Scoring:
+    contacts.metadata = {
+      "ai_score": 87,
+      "ai_sentiment": "positive",
+      "ai_churn_risk": 0.12,
+      "ai_next_best_action": "Send pricing PDF",
+      "ai_last_scored_at": "2026-04-07T14:30:00Z",
+      "ai_engagement_trend": "increasing"
+    }
+
+Example — WhatsApp Agent stores conversation data in contacts.metadata:
+
+  contacts.metadata = {
+    ...previous fields...,
+    "whatsapp_number": "+919876543210",
+    "whatsapp_last_message_at": "2026-04-07T15:00:00Z",
+    "whatsapp_conversation_count": 23,
+    "whatsapp_ai_last_reply": "Thanks! I'll send the proposal.",
+    "whatsapp_opted_in": true
+  }
+
+Example — Revenue Agent stores follow-up data in deals.metadata:
+
+  deals.metadata = {
+    "revenue_last_followup": "2026-04-05T10:00:00Z",
+    "revenue_next_followup": "2026-04-08T10:00:00Z",
+    "revenue_followup_count": 3,
+    "revenue_email_opens": 5,
+    "revenue_email_clicks": 2,
+    "revenue_ai_suggested_action": "Call now — they opened proposal 3 times"
+  }
+
+QUERYING JSONB DATA (Fast — GIN Index):
+
+  Find all HOT leads:
+    SELECT * FROM contacts 
+    WHERE metadata->>'ai_score' > '80'
+    AND tenant_id = 'xxx';
+
+  Find all contacts who received WhatsApp messages:
+    SELECT * FROM contacts 
+    WHERE metadata ? 'whatsapp_number'
+    AND tenant_id = 'xxx';
+
+  Find deals with upcoming follow-ups:
+    SELECT * FROM deals 
+    WHERE (metadata->>'revenue_next_followup')::timestamp < NOW() + INTERVAL '1 day'
+    AND tenant_id = 'xxx';
+
+INDEXES (Created once in migration 031):
+
+  CREATE INDEX idx_contacts_metadata_g ON contacts USING GIN (metadata);
+  CREATE INDEX idx_deals_metadata_g ON deals USING GIN (metadata);
+  CREATE INDEX idx_leads_metadata_g ON leads USING GIN (metadata);
+
+These GIN indexes make JSONB queries FAST — same speed as regular columns.
+
+--------------------------------------------------------------------------------
+ 1.3 Extension Tables (Each Feature Gets Its Own Tables)
+--------------------------------------------------------------------------------
+
+While core tables NEVER change, NEW features create their OWN tables.
+These tables reference core tables via foreign keys.
+
+Already existing extension tables (from migrations 010-030):
+
+  ai_insights          → AI scoring results (references contacts, deals)
+  ai_email_drafts      → AI-generated email drafts
+  contact_scores       → Detailed score breakdowns
+  ai_usage_logs        → AI API usage tracking
+  workflows            → Automation workflow definitions
+  workflow_actions     → Individual actions in workflows
+  workflow_execution_logs → Workflow run history
+  sequences            → Email sequences/campaigns
+  sequence_steps       → Steps in a sequence
+  sequence_enrollments → Contacts enrolled in sequences
+  sequence_step_logs   → Step execution history
+  email_templates      → Saved email templates
+  saved_reports        → User-saved reports
+  dashboards           → Custom dashboard layouts
+  products             → Product catalog
+  price_books          → Pricing configurations
+  quotes               → Generated proposals/quotes
+  quote_line_items     → Line items in quotes
+  call_recordings      → Voice call recordings
+  call_notes           → Notes from calls
+  conversation_metrics → Call analytics
+  churn_predictions     → Churn risk data
+  deal_forecasts       → Deal win predictions
+  revenue_projections  → Revenue forecasts
+  impersonation_sessions → Admin impersonation tracking
+  contact_lifecycle_history → Stage change history
+  contact_merge_history → Contact merge records
+  webhook_deliveries   → Webhook delivery tracking
+  failed_webhooks      → Failed webhook retries
+  automation_runs      → Automation execution history
+  billing_events       → Billing charge events
+  usage_snapshots      → Usage metering snapshots
+
+NEW tables needed for AI modules (migration 032):
+
+  whatsapp_conversations → WhatsApp message threads
+    id, tenant_id, contact_id, whatsapp_from, whatsapp_to,
+    status, last_message_at, message_count,
+    ai_enabled, ai_last_response,
+    created_at
+
+  whatsapp_messages → Individual WhatsApp messages
+    id, conversation_id, tenant_id,
+    direction (inbound|outbound), 
+    content_type (text|image|audio|document),
+    content TEXT,
+    ai_generated BOOLEAN DEFAULT false,
+    ai_model_used TEXT,
+    delivered BOOLEAN DEFAULT false,
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+
+  voice_calls → AI voice call records
+    id, tenant_id, contact_id, deal_id,
+    call_sid (Twilio SID),
+    direction (inbound|outbound),
+    status (queued|ringing|in-progress|completed|failed|busy|no-answer),
+    duration_seconds INT,
+    recording_url TEXT,
+    transcript TEXT,
+    ai_summary TEXT,
+    ai_sentiment TEXT,
+    ai_action_items JSONB,
+    cost_cents INT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+
+  content_generations → AI content creation history
+    id, tenant_id, user_id,
+    content_type (post|blog|email|reel_script|ad_copy),
+    input_prompt TEXT,
+    output_content TEXT,
+    model_used TEXT,
+    tokens_used INT,
+    cost_cents INT,
+    platform (linkedin|twitter|instagram|facebook|blog),
+    scheduled_for TIMESTAMPTZ,
+    published_at TIMESTAMPTZ,
+    engagement_data JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+
+  revenue_opportunities → Missed revenue detections
+    id, tenant_id,
+    opportunity_type (stale_lead|lost_deal|inactive_contact|missed_followup|expired_trial),
+    entity_type TEXT,
+    entity_id UUID,
+    estimated_value DECIMAL(12,2),
+    reason TEXT,
+    suggested_action TEXT,
+    status (new|reviewed|acted_on|dismissed),
+    detected_at TIMESTAMPTZ DEFAULT NOW(),
+    acted_at TIMESTAMPTZ,
+    metadata JSONB
+
+  ai_module_configs → Per-tenant AI module settings
+    id, tenant_id,
+    module_name TEXT,  -- 'lead_scoring', 'revenue_agent', 'whatsapp_agent', etc.
+    enabled BOOLEAN DEFAULT false,
+    config JSONB,      -- Model selection, thresholds, templates
+    usage_stats JSONB, -- Messages sent, API calls, costs
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(tenant_id, module_name)
+
+--------------------------------------------------------------------------------
+ 1.4 How AI Modules Store Data (No ALTER TABLE Ever)
+--------------------------------------------------------------------------------
+
+RULE: Every AI module follows the SAME pattern:
+
+Step 1: Module creates its own tables (one-time, via migration)
+Step 2: Module writes results to its own tables
+Step 3: Module ALSO writes key data to core table's metadata JSONB
+Step 4: Module registers itself in feature_registry
+
+Example: AI Lead Scoring
+
+  1. Has its own table: ai_insights (already exists from migration 018)
+  2. Stores detailed scores there:
+       INSERT INTO ai_insights (tenant_id, contact_id, insight_type, score, data)
+       VALUES ('tenant-1', 'contact-1', 'lead_score', 87, '{"factors": {...}}');
+
+  3. ALSO writes quick-access data to contacts.metadata:
+       UPDATE contacts SET metadata = jsonb_set(
+         metadata, '{ai_score}', '87'
+       ) WHERE id = 'contact-1';
+
+  4. Registers itself:
+       SELECT public.register_feature(
+         'ai_lead_scoring',
+         'Predictive lead scoring with HOT/WARM/COLD classification',
+         '1.0.0',
+         '["ai_score", "ai_sentiment", "ai_churn_risk"]'::jsonb,
+         '["contact", "lead", "deal"]'::jsonb,
+         '["ai_insights", "contact_scores"]'::jsonb
+       );
+
+Why both approaches?
+  - ai_insights table: Full detailed data, history, audit trail
+  - contacts.metadata: Fast access for UI display, filtering, sorting
+  - feature_registry: System knows what features exist and what keys they use
+
+--------------------------------------------------------------------------------
+ 1.5 Data Flow: What Happens When a Lead Enters the System
+--------------------------------------------------------------------------------
+
+Here's the COMPLETE journey of a single lead through the entire system:
+
+STEP 1: Lead is created (manual entry, form, import, or API)
+  → Row inserted into: leads or contacts table
+  → Activity logged: INSERT INTO activities (event_type='contact_created')
+  → Audit log: INSERT INTO audit_logs (action='create', entity_type='contact')
+
+STEP 2: AI Lead Scoring kicks in (background worker)
+  → Worker picks up new contact from queue (BullMQ → Redis)
+  → Calls AI API (OpenAI) with contact data
+  → AI returns: score=87, sentiment=positive, churn_risk=0.12
+  → Writes to: ai_insights table (detailed)
+  → Writes to: contacts.metadata (quick access)
+  → Activity logged: event_type='ai_scored'
+
+STEP 3: Revenue Agent evaluates the lead
+  → Worker checks: is score > 70? Yes → trigger follow-up
+  → Creates task: INSERT INTO tasks (title='Follow up with HOT lead')
+  → Creates sequence enrollment: INSERT INTO sequence_enrollments
+  → Sends first follow-up email via Resend API
+  → Activity logged: event_type='followup_sent'
+
+STEP 4: WhatsApp AI Agent (if tenant has WhatsApp enabled)
+  → Checks: does contact have whatsapp_number in metadata?
+  → If yes: sends WhatsApp greeting via WhatsApp Business API
+  → Stores message in: whatsapp_messages table
+  → Updates contacts.metadata: whatsapp_last_message_at
+  → If contact replies: AI generates response
+  → Response stored in: whatsapp_messages (ai_generated=true)
+  → Activity logged: event_type='whatsapp_received'
+
+STEP 5: AI Missed Opportunity Detector (daily cron)
+  → Scans all contacts: any HOT lead with no activity in 3 days?
+  → If found: creates revenue_opportunity record
+  → Sends notification: INSERT INTO notifications
+  → Suggested action: "Call now — deal going cold"
+
+STEP 6: Deal is created (salesperson moves lead to pipeline)
+  → Row inserted: deals table
+  → Stage set: 'qualification' or 'proposal'
+  → AI Proposal Generator (if enabled) creates PDF
+  → Proposal stored: quotes table
+  → PDF sent via email
+  → Email open tracked: email_tracking table
+  → Activity logged: event_type='proposal_sent'
+
+STEP 7: Voice Call (if AI Call Agent enabled)
+  → Worker schedules call via Twilio API
+  → Call recorded: voice_calls table
+  → Transcript stored: voice_calls.transcript
+  → AI summary: voice_calls.ai_summary
+  → Action items: voice_calls.ai_action_items
+  → Deal stage updated based on call outcome
+  → Activity logged: event_type='call_completed'
+
+STEP 8: Deal closes (won or lost)
+  → Deal stage updated: 'won' or 'lost'
+  → Revenue tracked: subscriptions metadata updated
+  → If lost: reason stored in deals.metadata
+  → AI learns: updates scoring model for similar leads
+  → Activity logged: event_type='deal_won' or 'deal_lost'
+
+Every single step is logged in the activities table.
+Every change is in audit_logs.
+Every AI result is in both extension table AND metadata JSONB.
+Nothing is ever lost.
+
+--------------------------------------------------------------------------------
+ 1.6 Complete Table List with Purpose and Relationships
+================================================================================
+
+CORE TABLES (18 — Never ALTER):
+  users              → Platform users (authentication)
+  tenants            → Customer businesses (multi-tenant)
+  tenant_members     → User-to-tenant membership
+  contacts           → CRM contacts/leads/customers
+  companies          → Company/organization records
+  deals              → Sales pipeline opportunities
+  leads              → Raw/unqualified leads
+  tasks              → To-dos and reminders
+  activities         → Activity timeline (everything logged here)
+  subscriptions      → Billing/plan per tenant
+  roles              → Permission roles
+  invitations        → Team invite tokens
+  sessions           → Login sessions
+  webhooks           → Outbound webhook endpoints
+  audit_logs         → Compliance audit trail
+  api_keys           → API access keys
+  tags               → Organizational tags
+  pipelines          → Sales pipeline definitions
+  notifications      → In-app notifications
+
+EXTENSION TABLES (Existing — from migrations 010-030):
+  ai_insights              → AI scoring/insights results
+  ai_email_drafts          → AI-generated email drafts
+  contact_scores           → Detailed score breakdowns
+  ai_usage_logs            → AI API usage tracking
+  workflows                → Automation workflow definitions
+  workflow_actions         → Workflow action definitions
+  workflow_execution_logs  → Workflow execution history
+  workflow_action_logs     → Individual action results
+  sequences                → Email sequence campaigns
+  sequence_steps           → Steps in sequences
+  sequence_enrollments     → Contact enrollment in sequences
+  sequence_step_logs       → Step execution tracking
+  email_templates          → Saved email templates
+  saved_reports            → User-saved reports
+  report_executions        → Report run history
+  dashboards               → Custom dashboard layouts
+  products                 → Product catalog
+  price_books              → Pricing configurations
+  price_book_entries       → Price book line items
+  quotes                   → Generated proposals/quotes
+  quote_line_items         → Quote line items
+  call_recordings          → Call recording metadata
+  call_notes               → Notes from calls
+  conversation_metrics     → Call analytics
+  conversation_keywords    → Keyword tracking
+  churn_predictions        → Churn risk predictions
+  deal_forecasts           → Deal win predictions
+  revenue_projections      → Revenue forecasts
+  pipeline_health_metrics  → Pipeline health data
+  impersonation_sessions   → Admin impersonation tracking
+  contact_lifecycle_history → Contact stage changes
+  contact_merge_history    → Contact merge records
+  webhook_deliveries       → Webhook delivery tracking
+  failed_webhooks          → Failed webhooks for retry
+  automation_runs          → Automation execution history
+  billing_events           → Billing charge events
+  usage_snapshots          → Usage metering data
+  error_logs               → Error tracking
+  health_checks            → System health tracking
+  support_tickets          → Support ticket tracking
+  announcements            → Platform announcements
+  limit_violations         → Plan limit violations
+  rate_limits              → Rate limiting tracking
+  modules                  → Feature modules
+  tenant_modules           → Tenant-module assignments
+  forms                    → Public form definitions
+  form_submissions         → Form submission data
+  meetings                 → Meeting scheduling
+  file_attachments         → File uploads
+  email_log                → Email sending log
+  email_tracking           → Email open/click tracking
+  automations              → Automation rule definitions
+  automation_workflows     → Automation workflow definitions
+  custom_field_defs        → Custom field definitions
+  permission_overrides     → Permission overrides
+  deal_products            → Deal-product associations
+  sso_providers            → SSO/SAML providers
+  sso_sessions             → SSO session records
+  field_permissions        → Field-level permissions
+  record_permissions       → Record-level permissions
+
+NEW EXTENSION TABLES (Migration 032 — for AI Modules):
+  whatsapp_conversations   → WhatsApp conversation threads
+  whatsapp_messages        → Individual WhatsApp messages
+  voice_calls              → AI voice call records
+  content_generations      → AI content creation history
+  revenue_opportunities    → Missed revenue detections
+  ai_module_configs        → Per-tenant AI module settings
+
+BACKUP/RESTORE TABLES (Migration 029):
+  tenant_backup_records    → Per-tenant backup records
+  tenant_restore_records   → Restore operation tracking
+  backup_schedules         → Automated backup schedules
+  critical_data_backups    → Pre-deletion data snapshots (90-day retention)
+
+TOTAL TABLES: 18 core + 55 existing extensions + 6 new AI + 4 backup = 83 tables
+
+
+================================================================================
+ PART 2: AI MODULES — HOW EACH ONE WORKS
+================================================================================
+
+--------------------------------------------------------------------------------
+ 2.1 AI Lead Scoring (Priority #1 — Build First)
+--------------------------------------------------------------------------------
+
+PURPOSE: Automatically score every contact as HOT, WARM, or COLD based on:
+  - Email open/click behavior
+  - Response time
+  - Deal stage progression
+  - Activity frequency
+  - Company size/industry
+  - Historical win patterns
+
+HOW IT WORKS:
+
+  1. Worker runs every hour (cron → /api/cron/auto-backup also triggers scoring)
+  2. Fetches all contacts with no score or last scored > 24h ago:
+       SELECT * FROM contacts 
+       WHERE (metadata->>'ai_last_scored_at')::timestamp < NOW() - INTERVAL '24 hours'
+       OR metadata->>'ai_score' IS NULL
+       AND tenant_id = 'xxx'
+       LIMIT 100
+
+  3. For each contact, builds a scoring payload:
+       {
+         "contact": { "email": "...", "phone": "...", "company": "..." },
+         "activities": [last 10 activities],
+         "deals": [active deals],
+         "email_stats": { "opened": 5, "clicked": 2, "replied": 1 },
+         "days_since_last_activity": 3,
+         "company_size": "small",
+         "industry": "technology"
+       }
+
+  4. Sends to AI API (OpenAI GPT-4o-mini — cheapest, fastest):
+       POST https://api.openai.com/v1/chat/completions
+       {
+         "model": "gpt-4o-mini",
+         "messages": [{
+           "role": "system",
+           "content": "You are a lead scoring engine. Analyze this contact and return JSON with: score (0-100), sentiment (positive/neutral/negative), churn_risk (0-1), next_best_action (string), confidence (0-1)."
+         }, {
+           "role": "user", 
+           "content": JSON.stringify(payload)
+         }],
+         "response_format": { "type": "json_object" }
+       }
+
+  5. AI returns:
+       {
+         "score": 87,
+         "sentiment": "positive",
+         "churn_risk": 0.12,
+         "next_best_action": "Send pricing PDF — they opened proposal 3 times",
+         "confidence": 0.91
+       }
+
+  6. Store results:
+       a) In ai_insights table (detailed, historical):
+          INSERT INTO ai_insights (tenant_id, contact_id, insight_type, score, data)
+          VALUES (tenant_id, contact_id, 'lead_score', 87, '{full AI response}');
+
+       b) In contacts.metadata (quick access):
+          UPDATE contacts SET metadata = jsonb_set(
+            jsonb_set(
+              jsonb_set(metadata, '{ai_score}', '87'),
+              '{ai_sentiment}', '"positive"'
+            ),
+            '{ai_next_best_action}', '"Send pricing PDF"'
+          ) WHERE id = contact_id;
+
+       c) In activity log:
+          INSERT INTO activities (tenant_id, contact_id, event_type, description, metadata)
+          VALUES (tenant_id, contact_id, 'ai_scored', 'Lead scored: 87 (HOT)', 
+                  '{"score": 87, "sentiment": "positive"}');
+
+  7. If score > 80 (HOT):
+       - Create task: INSERT INTO tasks (title='HOT lead — follow up now', priority='high')
+       - Send notification: INSERT INTO notifications (title='HOT Lead: John Doe')
+       - If Revenue Agent enabled: trigger immediate follow-up
+
+COST: ~₹0.50 per 100 contacts scored (GPT-4o-mini is extremely cheap)
+PLAN REQUIREMENT: Starter (₹999/mo) or higher
+
+--------------------------------------------------------------------------------
+ 2.2 AI Revenue Agent (Follow-up Automation — Priority #2)
+--------------------------------------------------------------------------------
+
+PURPOSE: Never lose a deal to silence. Automatically follows up with leads 
+  via email/WhatsApp based on AI-determined timing and content.
+
+HOW IT WORKS:
+
+  1. Worker runs every 30 minutes
+  2. Scans deals and contacts that need follow-up:
+       SELECT * FROM deals 
+       WHERE (metadata->>'revenue_next_followup')::timestamp < NOW()
+       AND stage NOT IN ('won', 'lost')
+       AND tenant_id = 'xxx'
+
+  3. For each deal needing follow-up:
+     a) Check what stage they're in
+     b) Check previous follow-up history (from activities table)
+     c) Check AI recommendation (from contacts.metadata->>'ai_next_best_action')
+     d) Generate personalized follow-up content using AI:
+          {
+            "contact_name": "John",
+            "deal_title": "Website Redesign",
+            "deal_value": "₹50,000",
+            "previous_interactions": ["Sent proposal on Apr 3", "Opened 3 times"],
+            "ai_recommendation": "Send pricing PDF",
+            "days_since_last_contact": 4
+          }
+
+     e) AI generates follow-up email:
+          "Hi John, I noticed you've been reviewing our proposal for the 
+           Website Redesign project (₹50,000). I've attached our pricing 
+           breakdown. Would you like to schedule a quick call this week?"
+
+     f) Send via Resend API (email) or WhatsApp Business API
+     g) Log the follow-up:
+        - INSERT INTO activities (event_type='followup_sent')
+        - Update deals.metadata: revenue_last_followup, revenue_next_followup
+        - Increment revenue_followup_count
+
+  4. Track engagement:
+     - Email opens tracked via pixel tracking (email_tracking table)
+     - Email clicks tracked via redirect links
+     - If opened but no reply in 24h → escalate to next follow-up
+     - If clicked pricing → create task for salesperson to call
+
+  5. Escalation ladder:
+     Follow-up 1: AI email (automatic)
+     Follow-up 2: AI email with different angle (automatic)
+     Follow-up 3: WhatsApp message (if enabled)
+     Follow-up 4: Task for salesperson to call (manual)
+     Follow-up 5: "Deal going cold" notification to manager
+
+COST: ~₹2 per 100 follow-ups (email is nearly free, WhatsApp is ₹0.50/msg)
+PLAN REQUIREMENT: Growth (₹2,999/mo) or higher
+
+--------------------------------------------------------------------------------
+ 2.3 WhatsApp AI Closer (Priority #3 — Biggest Selling Point in India)
+--------------------------------------------------------------------------------
+
+PURPOSE: AI-powered WhatsApp conversations that close deals automatically.
+
+HOW IT WORKS:
+
+  PREREQUISITE: Tenant must connect WhatsApp Business API
+    - They need a Meta Business account
+    - They get a phone number from Meta
+    - API credentials stored in ai_module_configs
+
+  INBOUND MESSAGE FLOW:
+
+  1. Customer sends WhatsApp message to business number
+  2. Meta webhook hits: POST /api/webhooks/whatsapp
+  3. Webhook handler:
+     a) Verifies signature (security check)
+     b) Extracts: from_number, message_text, message_type
+     c) Finds contact: SELECT * FROM contacts WHERE metadata->>'whatsapp_number' = from_number
+     d) If no contact found → creates new contact automatically
+     e) Stores message: INSERT INTO whatsapp_messages (direction='inbound', content=...)
+     f) Adds to activity: INSERT INTO activities (event_type='whatsapp_received')
+
+  4. AI generates response:
+     a) Fetches context:
+        - Contact's lead score
+        - Active deals
+        - Previous conversation history (last 10 whatsapp_messages)
+        - Company/industry context
+
+     b) Sends to AI with system prompt:
+        "You are a sales assistant for [Company Name]. 
+         You are friendly, professional, and focused on closing deals.
+         Contact score: 87 (HOT). Active deal: ₹50,000 Website Redesign.
+         They previously asked about pricing.
+         
+         Their message: 'Is there any discount for annual billing?'
+         
+         Respond naturally. Send pricing info. Push for a call booking.
+         Keep response under 300 characters for WhatsApp."
+
+     c) AI response: "Great question! For annual billing, we offer 15% off — 
+        that's ₹42,500 instead of ₹50,000. Would you like to hop on a quick 
+        call to discuss? I can also share a detailed breakdown 📊"
+
+  5. Send response:
+     a) Store: INSERT INTO whatsapp_messages (direction='outbound', ai_generated=true)
+     b) Send via WhatsApp Business API
+     c) Update contacts.metadata: whatsapp_last_message_at, whatsapp_conversation_count++
+
+  6. If AI detects intent to book meeting → creates task + calendar event
+  7. If AI detects pricing concern → sends pricing PDF via quote system
+  8. If AI detects objection → handles it using training data
+
+  OUTBOUND MESSAGE FLOW (Revenue Agent triggers WhatsApp):
+
+  1. Revenue Agent decides: "This HOT lead needs WhatsApp follow-up"
+  2. Generates message using AI (same as above)
+  3. Sends via WhatsApp API
+  4. Tracks delivery and read receipts
+
+  VOICE NOTE SUPPORT:
+
+  1. Customer sends voice note (audio/ogg)
+  2. Meta webhook sends audio URL
+  3. Download audio → send to OpenAI Whisper API (speech-to-text)
+  4. Get text → process as normal text message
+  5. AI generates text response → sends as text (can also convert to voice)
+
+  MULTI-LANGUAGE (Hindi/Marathi/English):
+
+  1. Detect language from message content
+  2. Set system prompt language accordingly
+  3. AI responds in same language
+  4. Supports code-switching (Hinglish)
+
+COST: 
+  - WhatsApp: ₹0.50-2.00 per message (depends on country, Meta charges per conversation)
+  - AI: ₹0.30 per response (GPT-4o-mini)
+  - Whisper (voice): ₹1.00 per minute of audio
+  Total: ~₹1-3 per conversation
+PLAN REQUIREMENT: Growth (₹2,999/mo) + pay-per-use WhatsApp charges
+
+--------------------------------------------------------------------------------
+ 2.4 AI Content Machine (Priority #6)
+--------------------------------------------------------------------------------
+
+PURPOSE: Generate social media posts, blogs, email campaigns from minimal input.
+
+HOW IT WORKS:
+
+  1. User opens Content Machine UI
+  2. Selects content type: post, blog, email, reel script, ad copy
+  3. Provides input: topic, tone, target audience, platform
+  4. AI generates content:
+     POST /api/tenant/ai/content
+     {
+       "type": "linkedin_post",
+       "topic": "How AI is changing sales",
+       "tone": "professional but conversational",
+       "audience": "B2B sales leaders",
+       "length": "300-500 words"
+     }
+
+  5. AI returns formatted content
+  6. Store in content_generations table
+  7. User can edit, approve, schedule, or publish
+  8. If scheduled → worker posts at scheduled time (via platform APIs)
+  9. Track engagement → store in content_generations.engagement_data
+
+  BATCH MODE (Weekly Content Calendar):
+
+  1. User clicks "Generate Week's Content"
+  2. AI creates 7 posts (one per day) across platforms
+  3. Shows calendar preview
+  4. User approves/edits
+  5. All scheduled automatically
+
+COST: ~₹2-5 per piece of content
+PLAN REQUIREMENT: Pro (₹5,999/mo) or pay-per-use add-on
+
+--------------------------------------------------------------------------------
+ 2.5 AI Call Agent — Voice AI (Priority #7)
+--------------------------------------------------------------------------------
+
+PURPOSE: AI calls leads, qualifies them, books meetings, handles objections.
+
+HOW IT WORKS:
+
+  PREREQUISITE: Twilio account connected
+
+  OUTBOUND CALL FLOW:
+
+  1. System decides to call a lead (HOT score, no response to emails/WhatsApp)
+  2. Worker initiates call via Twilio API:
+     POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json
+     {
+       "From": "+1234567890",
+       "To": "+919876543210",
+       "url": "https://yourapp.com/api/voice/twiml"
+     }
+
+  3. Twilio connects call → hits your TwiML endpoint
+  4. Your endpoint streams audio to AI (OpenAI Realtime API or Vapi/Bland AI)
+  5. AI handles the conversation:
+     - Greets: "Hi John, this is Alex from NuCRM. Do you have 2 minutes?"
+     - Qualifies: "What's your biggest challenge with lead management?"
+     - Handles objections: "I understand budget is a concern..."
+     - Books meeting: "How about Thursday at 3 PM?"
+  6. Call ends → recording URL received
+  7. System processes:
+     a) Download recording → store in S3
+     b) Transcribe via Whisper API → store transcript
+     c) AI generates summary → store ai_summary
+     d) Extract action items → store ai_action_items
+     e) Update contact/deal based on call outcome
+     f) Log everything in voice_calls table
+     g) Add to activities: event_type='ai_call_completed'
+
+  INBOUND CALL FLOW:
+
+  1. Lead calls business number
+  2. Twilio routes to your AI endpoint
+  3. AI answers: "Thanks for calling NuCRM, how can I help?"
+  4. Handles inquiry → creates contact if new → routes to human if needed
+
+COST:
+  - Twilio: ₹2-4 per minute (India calls)
+  - AI (Realtime API): ₹5-10 per minute
+  - Total: ₹7-14 per minute
+  - Average call: 3 minutes = ₹21-42 per call
+PLAN REQUIREMENT: Pro (₹5,999/mo) + pay-per-minute charges
+
+--------------------------------------------------------------------------------
+ 2.6 AI Proposal Generator (Priority #5)
+--------------------------------------------------------------------------------
+
+PURPOSE: Generate professional PDF proposals from deal data.
+
+HOW IT WORKS:
+
+  1. Salesperson clicks "Generate Proposal" on a deal
+  2. System gathers data:
+     - Contact details (name, company, email)
+     - Deal details (title, value, scope from metadata)
+     - Products/services from product catalog
+     - Company branding (from tenant metadata — logo, colors)
+  3. AI generates proposal content:
+     - Executive summary
+     - Scope of work
+     - Pricing breakdown
+     - Timeline
+     - Terms and conditions
+  4. Generates PDF (using PDF library)
+  5. Stores in quotes table
+  6. Sends via email to contact
+  7. Tracks: opened, time spent, pages viewed
+  8. If viewed → notifies salesperson: "They're reading the proposal!"
+  9. If opened 3+ times but no response → AI suggests: "Call now"
+
+COST: ~₹2-5 per proposal (AI + PDF generation)
+PLAN REQUIREMENT: Pro (₹5,999/mo) or add-on (₹50/proposal)
+
+--------------------------------------------------------------------------------
+ 2.7 AI Missed Opportunity Detector (Priority #4)
+--------------------------------------------------------------------------------
+
+PURPOSE: Find revenue you're losing — stale leads, lost deals, inactive contacts.
+
+HOW IT WORKS:
+
+  1. Cron runs daily at 6 AM: POST /api/cron/revenue-gaps
+  2. Scans EVERY tenant for missed opportunities:
+
+     a) STALE LEADS:
+        SELECT * FROM contacts 
+        WHERE metadata->>'ai_score' > '70'  -- HOT leads
+        AND id NOT IN (SELECT contact_id FROM activities WHERE created_at > NOW() - INTERVAL '3 days')
+        → Estimated value: avg deal value for this contact's stage
+
+     b) LOST DEALS WITH RECOVERY POTENTIAL:
+        SELECT * FROM deals 
+        WHERE stage = 'lost' AND updated_at > NOW() - INTERVAL '30 days'
+        → Estimated recovery: deal_value * 0.3 (30% chance of recovery)
+
+     c) INACTIVE CONTACTS:
+        SELECT * FROM contacts 
+        WHERE last_activity < NOW() - INTERVAL '14 days'
+        AND lead_status IN ('qualified', 'proposal_sent')
+
+     d) MISSED FOLLOW-UPS:
+        SELECT * FROM deals 
+        WHERE (metadata->>'revenue_next_followup')::timestamp < NOW() - INTERVAL '2 days'
+        AND stage NOT IN ('won', 'lost')
+
+     e) EXPIRED TRIALS:
+        SELECT * FROM tenants 
+        WHERE status = 'trial' AND trial_ends_at < NOW() - INTERVAL '7 days'
+
+  3. For each finding:
+     INSERT INTO revenue_opportunities (
+       tenant_id, opportunity_type, entity_type, entity_id,
+       estimated_value, reason, suggested_action, status
+     ) VALUES (...);
+
+  4. Sends daily digest to tenant owner:
+     "You have 3 HOT leads going cold.
+      Estimated missed revenue: ₹1,50,000
+      → View and take action: [link]"
+
+COST: Negligible (database queries only, no AI needed for detection)
+PLAN REQUIREMENT: Growth (₹2,999/mo) or higher
+
+--------------------------------------------------------------------------------
+ 2.8 AI Growth Agent (Priority #8 — Combination Module)
+--------------------------------------------------------------------------------
+
+PURPOSE: All-in-one growth — combines modules 2+3+5 for local businesses.
+
+HOW IT WORKS:
+
+  This is NOT a separate module. It's a COMBINATION of:
+  - WhatsApp AI Closer (module 2.3)
+  - AI Content Machine (module 2.4)
+  - AI Proposal Generator (module 2.6)
+  - AI Missed Opportunity Detector (module 2.7)
+
+  Bundled as one package for small businesses who want everything automated.
+
+  Additional features:
+  - Google Review requests (automated WhatsApp after service completion)
+  - WhatsApp broadcast campaigns (opt-in customers only)
+  - Ad suggestions (AI analyzes top customers → suggests Facebook/Google ad targeting)
+  - SEO suggestions (AI analyzes website → recommends improvements)
+
+COST: Sum of all included modules
+PLAN REQUIREMENT: Pro (₹5,999/mo) or Enterprise (₹14,999/mo)
+
+
+================================================================================
+ PART 3: INTEGRATIONS — HOW EXTERNAL SERVICES CONNECT
+================================================================================
+
+--------------------------------------------------------------------------------
+ 3.1 WhatsApp Business API
+--------------------------------------------------------------------------------
+
+SETUP:
+  1. Tenant creates Meta Business account (business.facebook.com)
+  2. Gets WhatsApp Business API access
+  3. Creates/uses a phone number
+  4. Gets API credentials (phone_number_id, access_token)
+  5. Stores credentials in ai_module_configs:
+     {
+       "module_name": "whatsapp_agent",
+       "config": {
+         "phone_number_id": "...",
+         "access_token": "encrypted...",
+         "business_account_id": "...",
+         "webhook_verify_token": "..."
+       }
+     }
+
+WEBHOOK SETUP:
+  1. Meta sends webhooks to: POST /api/webhooks/whatsapp
+  2. Webhook verifies with x-hub-signature-256 header
+  3. Parses incoming message
+  4. Routes to WhatsApp AI Agent
+
+API CALLS:
+  Send message:
+    POST https://graph.facebook.com/v18.0/{phone_number_id}/messages
+    Headers: Authorization: Bearer {access_token}
+    Body: {
+      "messaging_product": "whatsapp",
+      "to": "+919876543210",
+      "type": "text",
+      "text": { "body": "Hi! How can I help?" }
+    }
+
+  Send template (pre-approved message):
+    POST .../messages
+    Body: {
+      "messaging_product": "whatsapp",
+      "to": "+919876543210",
+      "type": "template",
+      "template": {
+        "name": "followup_message",
+        "language": { "code": "en" },
+        "components": [...]
+      }
+    }
+
+COST (Meta charges):
+  - Marketing conversation: ₹0.70-2.00 per conversation
+  - Utility conversation: ₹0.35-1.00 per conversation  
+  - Service conversation: ₹0.35-1.00 per conversation
+  - Authentication: ₹0.35-0.70 per conversation
+  (A "conversation" = 24-hour window of messaging)
+
+REVENUE MODEL:
+  - Charge customer: ₹0.50-1.00 per message
+  - Meta charges you: ₹0.35-2.00 per conversation
+  - Margin: ₹0.10-0.50 per message (volume discount from Meta helps)
+
+--------------------------------------------------------------------------------
+ 3.2 Twilio (Voice Calls)
+--------------------------------------------------------------------------------
+
+SETUP:
+  1. Platform-level Twilio account (one account serves all tenants)
+  2. Buy phone numbers per region
+  3. Store credentials in platform .env (not per-tenant)
+  4. Track usage per tenant → bill accordingly
+
+API CALLS:
+  Make call:
+    POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json
+    Auth: Basic {account_sid}:{auth_token}
+    Body: {
+      "From": "+1234567890",
+      "To": "+919876543210",
+      "url": "https://yourapp.com/api/voice/twiml"
+    }
+
+  TwiML endpoint (your server handles the call):
+    <Response>
+      <Connect>
+        <Stream url="wss://yourapp.com/api/voice/stream"/>
+      </Connect>
+    </Response>
+
+COST (Twilio charges):
+  - India outbound: ₹1.40/min
+  - India inbound: ₹0.80/min
+  - US/Canada outbound: ₹1.10/min
+  - Recording: ₹0.05/min
+  - Total per call (3 min avg): ₹4-8
+
+REVENUE MODEL:
+  - Charge customer: ₹3-5/min
+  - Twilio charges you: ₹1.40-2.00/min
+  - Margin: ₹1-3/min
+
+--------------------------------------------------------------------------------
+ 3.3 Stripe (Billing/Payments)
+--------------------------------------------------------------------------------
+
+SETUP:
+  1. Platform Stripe account
+  2. Create products for each plan:
+     - prod_free → ₹0
+     - prod_starter → ₹999/mo
+     - prod_growth → ₹2,999/mo
+     - prod_pro → ₹5,999/mo
+     - prod_enterprise → ₹14,999/mo
+  3. Create metered billing products for usage add-ons:
+     - prod_whatsapp_msgs → ₹0.50/message
+     - prod_voice_minutes → ₹3/min
+     - prod_content_gen → ₹5/piece
+
+WEBHOOKS:
+  Stripe sends events to: POST /api/webhooks/stripe
+  Events handled:
+  - invoice.paid → Update subscription status
+  - invoice.payment_failed → Notify tenant, retry
+  - customer.subscription.updated → Update plan/limits
+  - customer.subscription.deleted → Downgrade to free
+  - meter.updated → Track usage charges
+
+FLOW:
+  1. Tenant clicks "Upgrade"
+  2. Creates Stripe Checkout Session
+  3. Tenant pays via card/UPI/netbanking
+  4. Stripe webhook confirms payment
+  5. Update subscriptions table: plan='growth', status='active'
+  6. Enable AI modules for tenant:
+     UPDATE ai_module_configs SET enabled=true WHERE tenant_id='xxx'
+  7. Tenant gets instant access
+
+--------------------------------------------------------------------------------
+ 3.4 OpenAI / AI Provider
+--------------------------------------------------------------------------------
+
+SETUP:
+  1. Platform-level OpenAI account
+  2. API key stored in .env: OPENAI_API_KEY
+  3. Usage tracked per tenant in ai_usage_logs table
+  4. Bill accordingly
+
+MODELS USED:
+  - gpt-4o-mini: Lead scoring, follow-up generation, WhatsApp replies
+    Cost: $0.15/1M input tokens, $0.60/1M output tokens
+    ₹12/1M input, ₹50/1M output
+    Avg cost per call: ₹0.30
+
+  - gpt-4o: Complex tasks (proposals, content, strategy)
+    Cost: $2.50/1M input, $10/1M output
+    ₹200/1M input, ₹800/1M output  
+    Avg cost per call: ₹3-5
+
+  - text-embedding-3-small: Search, similarity
+    Cost: $0.02/1M tokens
+    Very cheap — ₹1.50/1M tokens
+
+  - whisper-1: Voice-to-text
+    Cost: $0.006/min
+    ₹0.50/min of audio
+
+USAGE TRACKING:
+  Every AI call is logged:
+  INSERT INTO ai_usage_logs (
+    tenant_id, module, model, tokens_input, tokens_output, cost_cents, created_at
+  ) VALUES (...);
+
+  Daily aggregation for billing:
+  SELECT tenant_id, SUM(cost_cents) FROM ai_usage_logs 
+  WHERE created_at > NOW() - INTERVAL '1 day'
+  GROUP BY tenant_id
+
+--------------------------------------------------------------------------------
+ 3.5 Email (Resend / SMTP)
+--------------------------------------------------------------------------------
+
+SETUP:
+  1. Resend.com account (or SendGrid, Mailgun)
+  2. Verify domain (DKIM, SPF, DMARC)
+  3. API key in .env: RESEND_API_KEY
+  4. From address: noreply@yourdomain.com
+
+API CALLS:
+  POST https://api.resend.com/emails
+  Headers: Authorization: Bearer {api_key}
+  Body: {
+    "from": "NuCRM <noreply@yourdomain.com>",
+    "to": "john@company.com",
+    "subject": "Follow-up: Website Redesign Proposal",
+    "html": "<p>Hi John...</p>",
+    "headers": {
+      "X-Entity-Ref": "contact:abc-123"  → for tracking
+    }
+  }
+
+TRACKING:
+  - Open tracking: invisible pixel in email → hits /api/track/open?id=xxx
+  - Click tracking: all links go through /api/track/click?url=xxx
+  - Both stored in email_tracking table
+
+COST:
+  - Resend: 3,000 emails/month free, then ₹0.80/1000 emails
+  - Essentially free for most tenants
+
+--------------------------------------------------------------------------------
+ 3.6 Redis (Caching + Queues)
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  1. Cache: Store frequently-accessed data (dashboard stats, contact lists)
+  2. Queue: Background job processing (BullMQ)
+
+QUEUES:
+  - ai-scoring: Lead scoring jobs
+  - follow-ups: Revenue Agent follow-ups
+  - whatsapp: WhatsApp message sending
+  - content-generation: AI content generation
+  - voice-calls: Outbound voice calls
+  - emails: Bulk email sending
+  - backups: Tenant backup jobs
+
+WHY REDIS:
+  - Fast (sub-millisecond reads)
+  - Reliable (persistent queues)
+  - Scalable (multiple workers can process same queue)
+
+SETUP:
+  - Docker: redis:7-alpine container
+  - Local: brew install redis / apt install redis-server
+  - Connection: REDIS_URL=redis://localhost:6379
+
+--------------------------------------------------------------------------------
+ 3.7 S3 / R2 (File Storage + Backups)
+--------------------------------------------------------------------------------
+
+PURPOSE:
+  1. Store uploaded files (avatars, documents, attachments)
+  2. Store voice call recordings
+  3. Store tenant backup files
+  4. Store generated proposal PDFs
+
+SETUP:
+  - Cloudflare R2 (cheaper than S3, no egress fees)
+  - Or AWS S3
+  - Or MinIO (self-hosted)
+
+  Credentials in .env:
+    BACKUP_BUCKET=your-bucket
+    AWS_ACCESS_KEY_ID=xxx
+    AWS_SECRET_ACCESS_KEY=xxx
+    S3_REGION=auto  (R2) or us-east-1 (S3)
+
+COST:
+  - R2: $0.015/GB storage, FREE egress
+  - S3: $0.023/GB storage, $0.09/GB egress
+  - For 1000 customers × 50MB each = 50GB = ~$0.75-1.15/month
+
+================================================================================
+ PART 4: BILLING & FEATURE GATING
+================================================================================
+
+--------------------------------------------------------------------------------
+ 4.1 How Plans Control Access to Modules
+--------------------------------------------------------------------------------
+
+Each tenant's plan is stored in: subscriptions.plan
+
+Middleware checks plan before allowing access to AI modules:
+
+  // In every AI module's API route:
+  export async function POST(req) {
+    const ctx = await requireAuth(req);
+    
+    // Get tenant's subscription
+    const sub = await queryOne(
+      `SELECT plan, status FROM subscriptions WHERE tenant_id = $1`,
+      [ctx.tenantId]
+    );
+
+    // Check plan level
+    const PLAN_LEVELS = { free: 0, starter: 1, growth: 2, pro: 3, enterprise: 4 };
+    const requiredLevel = { 
+      'ai_lead_scoring': 1,        // Starter+
+      'ai_revenue_agent': 2,       // Growth+
+      'ai_whatsapp_agent': 2,      // Growth+
+      'ai_content_gen': 3,         // Pro+
+      'ai_voice_agent': 3,         // Pro+
+      'ai_proposals': 3,           // Pro+
+      'ai_revenue_gaps': 2,        // Growth+
+    };
+
+    if (PLAN_LEVELS[sub.plan] < requiredLevel[module]) {
+      return NextResponse.json({ 
+        error: `Upgrade to ${requiredPlan} plan`,
+        upgradeUrl: '/tenant/settings/billing/upgrade'
+      }, { status: 402 });
+    }
+
+    // Also check usage limits
+    const usage = await queryOne(
+      `SELECT usage_stats FROM ai_module_configs 
+       WHERE tenant_id = $1 AND module_name = $2`,
+      [ctx.tenantId, moduleName]
+    );
+
+    if (usage && usage.usage_stats.monthly_count >= usage.usage_stats.monthly_limit) {
+      return NextResponse.json({
+        error: 'Monthly limit reached. Upgrade or wait for next billing period.',
+        usageData: usage.usage_stats
+      }, { status: 429 });
+    }
+
+    // Proceed with AI module logic...
+  }
+
+PLAN MATRIX:
+  Feature              Free  Starter  Growth   Pro      Enterprise
+  ────────────────────── ───── ──────── ──────── ──────── ──────────
+  Contacts              100    500     2,000    10,000   Unlimited
+  Users                  1     2        5       15       Unlimited
+  AI Lead Scoring        ✗     ✓        ✓        ✓         ✓
+  AI Revenue Agent       ✗     ✗        ✓        ✓         ✓
+  WhatsApp AI Agent      ✗     ✗        ✓        ✓         ✓
+  AI Content Machine     ✗     ✗        ✗        ✓         ✓
+  AI Call Agent          ✗     ✗        ✗        ✓         ✓
+  AI Proposals           ✗     ✗        ✗        ✓         ✓
+  Missed Opportunity     ✗     ✗        ✓        ✓         ✓
+  Custom Domains         ✗     ✗        ✗        ✓         ✓
+  White-label            ✗     ✗        ✗        ✗         ✓
+  Priority Support       ✗     ✗        ✗        ✗         ✓
+  API Access             ✗     ✗        ✓        ✓         ✓
+  SSO                    ✗     ✗        ✗        ✗         ✓
+
+--------------------------------------------------------------------------------
+ 4.2 Pay-As-You-Go Add-ons
+--------------------------------------------------------------------------------
+
+Even on paid plans, usage-heavy features are billed per use:
+
+  ADD-ON                 INCLUDED IN PLAN     OVERAGE RATE
+  ─────────────────────── ───────────────────  ──────────────
+  WhatsApp messages       500/mo (Growth)      ₹0.50/message
+  AI Call minutes         60 min/mo (Pro)      ₹3/minute
+  AI Content pieces       20/mo (Pro)           ₹5/piece
+  AI Proposals            5/mo (Pro)            ₹50/proposal
+  Extra contacts          per plan limit        ₹100/500 contacts
+  Additional users        per plan limit        ₹200/user/month
+  Storage                 1GB (all plans)       ₹50/GB/month
+
+HOW USAGE IS TRACKED:
+  1. Every WhatsApp message sent → increment counter in ai_module_configs.usage_stats
+  2. Every AI call minute → log in ai_usage_logs
+  3. At end of billing cycle → sum all usage → create Stripe invoice
+  4. Stripe charges card automatically
+
+--------------------------------------------------------------------------------
+ 4.3 Usage Tracking and Billing Calculation
+--------------------------------------------------------------------------------
+
+Monthly billing cycle:
+
+  Day 1: Billing cycle starts
+    - Reset all usage counters to 0
+    - Generate base invoice for plan (₹2,999 for Growth)
+
+  Day 1-30: Usage accumulates
+    - Each WhatsApp message → usage_stats.whatsapp_count++
+    - Each AI call minute → usage_stats.voice_minutes++
+    - Each content piece → usage_stats.content_count++
+
+  Day 30: Billing cycle ends
+    - Calculate overage:
+        whatsapp_overage = max(0, whatsapp_count - 500) * ₹0.50
+        voice_overage = max(0, voice_minutes - 60) * ₹3.00
+        content_overage = max(0, content_count - 20) * ₹5.00
+    
+    - Total invoice = base_plan + all_overages
+    - Stripe charges card
+    - Send receipt via email
+
+  Example invoice for Growth customer:
+    Base plan (Growth):        ₹2,999
+    WhatsApp (1200 msgs):      1200 - 500 = 700 × ₹0.50 = ₹350
+    AI Calls (30 min):         30 - 60 = 0 (within limit)  = ₹0
+    Content (5 pieces):        5 - 20 = 0 (within limit)   = ₹0
+    ─────────────────────────────────────────
+    TOTAL:                     ₹3,349
+
+
+================================================================================
+ PART 5: DATA FLOW — COMPLETE JOURNEY
+================================================================================
+
+--------------------------------------------------------------------------------
+ 5.1 Lead Enters System → Scored → Followed Up → Closed
+--------------------------------------------------------------------------------
+
+DAY 1 — Lead Entry:
+  10:00 AM: John fills out form on tenant's website
+  → Form submission hits: POST /api/tenant/forms/abc/submit
+  → Creates contact: INSERT INTO contacts (first_name='John', email='john@co.com', ...)
+  → Activity logged: event_type='form_submitted'
+  → Notification sent to salesperson: "New lead: John Doe"
+
+  10:01 AM: AI Lead Scoring picks up new contact
+  → Worker fetches contact
+  → Builds scoring payload from contact data
+  → Sends to OpenAI API
+  → Returns: score=82, sentiment=positive, next_best_action="Send case study"
+  → Updates contacts.metadata
+  → Task created: "Send case study to John" (priority=medium)
+  → John classified as: WARM (score 70-89)
+
+DAY 2 — First Follow-up:
+  9:00 AM: Revenue Agent sees John is WARM
+  → AI generates personalized email:
+    "Hi John, thanks for your interest! Here's how we helped 
+     [similar company] achieve [result]. Would you like to 
+     see how this applies to your situation?"
+  → Email sent via Resend
+  → Activity logged: event_type='followup_sent'
+  → deals.metadata: revenue_next_followup = 3 days from now
+
+  2:00 PM: John opens email (tracking pixel fires)
+  → email_tracking: opened=true
+  → Activity logged: event_type='email_opened'
+  → AI re-scores: score → 88 (WARM → approaching HOT)
+
+DAY 3 — WhatsApp Engagement:
+  10:00 AM: Revenue Agent decides to try WhatsApp
+  → Checks: does John have whatsapp_number in metadata? Yes
+  → AI generates WhatsApp message:
+    "Hi John 👋 Hope you had a chance to review our email. 
+     Quick question — what's your biggest challenge with 
+     lead management right now?"
+  → Sent via WhatsApp Business API
+  → Stored in whatsapp_messages table
+
+  3:00 PM: John replies: "We lose 40% of our leads to no follow-up"
+  → Webhook received
+  → AI analyzes: this is a PAIN POINT
+  → AI responds: "That's exactly what we solve. Our automated 
+    follow-up system ensures no lead falls through the cracks. 
+     Want to see a quick demo?"
+  → Activity logged: event_type='whatsapp_conversation'
+  → AI re-scores: score → 95 (HOT!)
+
+DAY 5 — Deal Created:
+  11:00 AM: Salesperson sees HOT score
+  → Creates deal: INSERT INTO deals (title='Automation System', value=50000, stage='qualification')
+  → Activity logged: event_type='deal_created'
+  → AI suggests: "Send proposal — they're ready"
+
+DAY 7 — Proposal Sent:
+  10:00 AM: Salesperson clicks "Generate Proposal"
+  → AI Proposal Generator creates PDF:
+    - Uses contact info, deal value, company branding
+    - Includes case study relevant to John's pain point
+    - Professional formatting with pricing table
+  → PDF stored: quotes table
+  → Sent via email to John
+  → Activity logged: event_type='proposal_sent'
+
+DAY 8 — Proposal Engagement:
+  9:00 AM: John opens proposal (tracking pixel)
+  → email_tracking: proposal_opened=true
+  → Notification to salesperson: "John viewed the proposal!"
+  
+  11:00 AM: John opens proposal AGAIN (3rd time)
+  → AI Revenue Agent detects: "They opened it 3 times → HIGH intent"
+  → Suggests: "Call now — they're about to decide"
+  → Task created: "Call John — proposal viewed 3 times" (priority=URGENT)
+
+DAY 9 — Call & Close:
+  2:00 PM: Salesperson calls John
+  → John agrees to deal
+  → Salesperson updates deal stage: 'won'
+  → Activity logged: event_type='deal_won'
+  → Revenue: ₹50,000 recorded
+  → Thank you email sent automatically
+  → AI learns: this pattern (form → email → WhatsApp → proposal → close) = successful
+
+TOTAL JOURNEY: 9 days from lead to close
+AI TOUCHPOINTS: 4 (scoring, follow-up, WhatsApp, proposal suggestion)
+HUMAN TOUCHPOINTS: 2 (deal creation, closing call)
+COST: ~₹15 (AI + WhatsApp + email)
+REVENUE: ₹50,000
+ROI: 3,333x
+
+
+================================================================================
+ PART 6: DYNAMIC SCHEMA — HOW NEW FEATURES ADD FIELDS WITHOUT MIGRATIONS
+================================================================================
+
+--------------------------------------------------------------------------------
+ 6.1 The JSONB metadata Pattern
+--------------------------------------------------------------------------------
+
+EVERY core table has this column:
+
+  metadata JSONB DEFAULT '{}'::jsonb
+
+This column is like a mini-database inside each row.
+
+BEFORE (traditional approach — requires migration):
+  ALTER TABLE contacts ADD COLUMN ai_score INT;
+  ALTER TABLE contacts ADD COLUMN ai_sentiment TEXT;
+  ALTER TABLE contacts ADD COLUMN whatsapp_number TEXT;
+  ALTER TABLE contacts ADD COLUMN whatsapp_opted_in BOOLEAN;
+  → 4 migrations. 4 column additions. Risk of conflicts.
+
+AFTER (JSONB approach — zero migrations):
+  UPDATE contacts SET metadata = '{
+    "ai_score": 87,
+    "ai_sentiment": "positive",
+    "whatsapp_number": "+919876543210",
+    "whatsapp_opted_in": true
+  }' WHERE id = 'xxx';
+  → Zero migrations. Instant. No schema changes.
+
+QUERYING is the same:
+  Traditional: SELECT * FROM contacts WHERE ai_score > 80;
+  JSONB:       SELECT * FROM contacts WHERE metadata->>'ai_score' > '80';
+
+Both use indexes. Both are fast. But JSONB needs ZERO schema changes.
+
+--------------------------------------------------------------------------------
+ 6.2 Feature Registry System
+--------------------------------------------------------------------------------
+
+The feature_registry table tracks which features exist and what they use:
+
+  id: uuid
+  feature_name: "ai_lead_scoring"
+  description: "Predictive lead scoring"
+  version: "1.0.0"
+  enabled: true
+  metadata_keys: ["ai_score", "ai_sentiment", "ai_churn_risk"]
+  entities: ["contact", "lead", "deal"]
+  requires_tables: ["ai_insights", "contact_scores"]
+  registered_at: 2026-04-07
+  updated_at: 2026-04-07
+
+WHY THIS MATTERS:
+  1. The system KNOWS what features are installed
+  2. The admin panel can SHOW which features are active
+  3. Migration runner KNOWS which tables to create
+  4. Billing system KNOWS which features to gate
+  5. Data explorer KNOWS which metadata keys to display
+
+WHEN A NEW MODULE IS BUILT:
+  1. Developer creates new tables (one migration)
+  2. Module calls register_feature() on startup
+  3. System automatically knows about it
+  4. Admin can enable/disable it per tenant
+  5. Billing can gate it by plan
+
+--------------------------------------------------------------------------------
+ 6.3 Custom Fields (Tenant-Defined)
+--------------------------------------------------------------------------------
+
+Tenants can create their OWN fields without ANY code:
+
+  POST /api/tenant/custom-fields
+  {
+    "entityType": "contact",
+    "fieldKey": "linkedin_url",
+    "fieldLabel": "LinkedIn Profile",
+    "fieldType": "url"
+  }
+
+  → Stored in custom_field_defs table
+  → Values stored in contacts.metadata
+
+Tenant can define unlimited fields:
+  - "Referral Source" (dropdown: Google, Friend, LinkedIn, Ad)
+  - "Budget Range" (currency: ₹10,000-50,000)
+  - "Decision Maker" (boolean)
+  - "Preferred Contact" (select: Email, WhatsApp, Phone)
+
+All values go into the same metadata JSONB column.
+No migrations. No schema changes. No code deploys.
+
+--------------------------------------------------------------------------------
+ 6.4 How to Add a New Module (Step-by-Step)
+================================================================================
+
+To add "AI Tweet Generator" as a new module:
+
+STEP 1: Create new tables (one migration file):
+  CREATE TABLE IF NOT EXISTS ai_tweets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(id),
+    contact_id UUID REFERENCES contacts(id),
+    content TEXT,
+    scheduled_at TIMESTAMPTZ,
+    published_at TIMESTAMPTZ,
+    engagement JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+STEP 2: Register the feature (in code, on startup):
+  POST /api/tenant/custom-fields?action=register-feature
+  {
+    "featureName": "ai_tweets",
+    "metadataKeys": ["tweet_scheduled", "tweet_published"],
+    "entities": ["contact"],
+    "requiresTables": ["ai_tweets"]
+  }
+
+STEP 3: Add billing gate (middleware check):
+  // In the AI tweet API route:
+  if (PLAN_LEVELS[sub.plan] < 3) { // Pro+
+    return NextResponse.json({ error: "Upgrade to Pro" }, { status: 402 });
+  }
+
+STEP 4: Build the UI:
+  → Add page: /tenant/ai/tweets
+  → User writes prompt → AI generates tweet → Schedule/post
+
+STEP 5: Done. Zero changes to core database. Zero risk.
+
+
+================================================================================
+ PART 7: COST ARCHITECTURE — HOW MUCH EVERYTHING COSTS
+================================================================================
+
+--------------------------------------------------------------------------------
+ 7.1 Server Costs (Infrastructure)
+--------------------------------------------------------------------------------
+
+For 1-500 customers:
+  ─────────────────────────────────────────
+  VPS (Hetzner/DigitalOcean):  ₹2,000-4,000/mo
+    - 4 CPU, 8GB RAM, 160GB SSD
+    - Runs: Next.js, PostgreSQL, Redis, Worker
+
+  Database (managed PostgreSQL):   ₹3,000-6,000/mo
+    - Or self-hosted on same VPS (free)
+
+  CDN (Cloudflare):                ₹0/mo (free tier)
+
+  Total infrastructure: ₹2,000-10,000/mo
+  Per customer (at 100): ₹20-100/mo
+  Per customer (at 500): ₹4-20/mo
+
+For 500-5000 customers:
+  ─────────────────────────────────────────
+  VPS (scale up):              ₹8,000-15,000/mo
+    - 2-3 servers, load balanced
+
+  Managed Database:            ₹10,000-20,000/mo
+    - Read replicas for scale
+
+  Redis (managed):             ₹2,000-5,000/mo
+
+  Total: ₹20,000-40,000/mo
+  Per customer (at 1000): ₹20-40/mo
+
+--------------------------------------------------------------------------------
+ 7.2 AI API Costs
+--------------------------------------------------------------------------------
+
+Per customer per month (typical usage):
+  ─────────────────────────────────────────
+  Lead Scoring (500 contacts × ₹0.30):          ₹150
+  Revenue Agent (100 follow-ups × ₹0.50):       ₹50
+  WhatsApp AI (200 messages × ₹0.30):           ₹60
+  Content Gen (10 pieces × ₹3):                 ₹30
+  Proposals (5 proposals × ₹3):                 ₹15
+  Voice Calls (10 min × ₹8):                    ₹80
+
+  Total AI cost per customer:                    ₹385/mo
+
+  This is the COST. You charge ₹2,999-5,999 for the plan.
+  AI cost is 6-13% of revenue. The rest is profit.
+
+--------------------------------------------------------------------------------
+ 7.3 WhatsApp / Twilio Costs
+--------------------------------------------------------------------------------
+
+Per customer per month (typical usage):
+  ─────────────────────────────────────────
+  WhatsApp (500 conversations × ₹0.70):  ₹350
+  Voice Calls (30 min × ₹2):             ₹60
+
+  Total communication cost:              ₹410/mo
+
+--------------------------------------------------------------------------------
+ 7.4 Profit Margin Per Customer
+--------------------------------------------------------------------------------
+
+Growth Plan Customer (₹2,999/mo):
+  ─────────────────────────────────────────
+  Revenue:                         ₹2,999
+  + WhatsApp overage (200 msgs):     ₹100
+  + Content overage (5 pieces):       ₹25
+  ────────────────────────────────────────
+  Total revenue:                   ₹3,124
+
+  Costs:
+    AI APIs:                         ₹385
+    WhatsApp:                        ₹350
+    Voice calls:                      ₹60
+    Infrastructure (shared):          ₹20
+  ────────────────────────────────────────
+  Total cost:                        ₹815
+
+  PROFIT:                          ₹2,309/mo per customer
+  MARGIN:                            74%
+
+At 100 customers: ₹2,30,900/month profit
+At 500 customers: ₹11,54,500/month profit
+At 1000 customers: ₹23,09,000/month profit
+
+These numbers are CONSERVATIVE. Power users will pay more in overages.
+
+
+================================================================================
+ PART 8: SECURITY & DATA PROTECTION
+================================================================================
+
+--------------------------------------------------------------------------------
+ 8.1 Multi-Tenant Data Isolation
+--------------------------------------------------------------------------------
+
+EVERY query includes tenant_id filter:
+  SELECT * FROM contacts WHERE tenant_id = $1 AND ...
+
+Row-Level Security (RLS) on all core tables:
+  ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY tenant_isolation ON contacts
+    USING (tenant_id = current_setting('app.current_tenant')::uuid);
+
+This means: even if a bug in code leaks a query, PostgreSQL will 
+automatically filter by tenant_id. Data cannot leak between tenants.
+
+--------------------------------------------------------------------------------
+ 8.2 Backup & Restore System (90-Day Retention)
+--------------------------------------------------------------------------------
+
+AUTOMATED:
+  - Scheduled backups run per backup_schedules config
+  - Each tenant's data exported to JSONB
+  - Stored in tenant_backup_records table
+  - Retained for 90 days (configurable)
+  - Auto-purged after retention period
+
+CRITICAL DATA PROTECTION:
+  - Before ANY deletion, full row is captured in critical_data_backups
+  - Even if someone deletes a contact, the data is preserved for 90 days
+  - Can be restored with one click from admin panel
+
+PER-TENANT RESTORE:
+  - Only one tenant's data is restored at a time
+  - No impact on other tenants
+  - Can restore specific tables or all data
+
+--------------------------------------------------------------------------------
+ 8.3 Audit Logging
+--------------------------------------------------------------------------------
+
+EVERY action is logged:
+  INSERT INTO audit_logs (
+    tenant_id, user_id, action, entity_type, entity_id,
+    metadata, ip_address, created_at
+  );
+
+This includes:
+  - Login/logout
+  - Data creates/updates/deletes
+  - Plan changes
+  - Module enables/disables
+  - Admin impersonation
+  - API key usage
+
+Immutable: audit_logs cannot be deleted or modified.
+
+--------------------------------------------------------------------------------
+ 8.4 Rate Limiting & Abuse Prevention
+--------------------------------------------------------------------------------
+
+API rate limiting per tenant:
+  - Free: 100 requests/hour
+  - Starter: 500 requests/hour
+  - Growth: 2,000 requests/hour
+  - Pro: 10,000 requests/hour
+  - Enterprise: unlimited
+
+AI usage rate limiting:
+  - Lead scoring: 100 contacts/hour
+  - WhatsApp: 50 messages/hour
+  - Voice calls: 10 concurrent calls
+
+Brute force prevention:
+  - Login: 5 attempts per 15 minutes
+  - Password reset: 3 per hour
+  - 2FA: 10 attempts per hour
+
+
+================================================================================
+ PART 9: SCALING PLAN
+================================================================================
+
+--------------------------------------------------------------------------------
+ 9.1 1-100 Customers
+--------------------------------------------------------------------------------
+
+Infrastructure:
+  - 1 VPS (4 CPU, 8GB RAM)
+  - PostgreSQL on same server
+  - Redis on same server
+  - Single worker process
+
+Handles: ~100 customers easily
+Cost: ₹2,000-4,000/mo
+Revenue at 100 customers: ₹3,00,000-6,00,000/mo
+
+--------------------------------------------------------------------------------
+ 9.2 100-1000 Customers
+--------------------------------------------------------------------------------
+
+Infrastructure:
+  - 2-3 VPS (load balanced)
+  - Managed PostgreSQL (separate)
+  - Managed Redis (separate)
+  - Multiple worker processes (queue-based)
+
+Handles: ~1000 customers
+Cost: ₹20,000-40,000/mo
+Revenue at 1000 customers: ₹30,00,000-60,00,000/mo
+
+--------------------------------------------------------------------------------
+ 9.3 1000-10,000 Customers
+================================================================================
+
+Infrastructure:
+  - Kubernetes cluster (or Docker Swarm)
+  - PostgreSQL with read replicas
+  - Redis cluster
+  - Auto-scaling workers
+  - CDN for static assets
+  - Multiple regions for low latency
+
+Handles: 10,000+ customers
+Cost: ₹1,00,000-3,00,000/mo
+Revenue at 10,000 customers: ₹3,00,00,000-6,00,00,000/mo
+
+
+================================================================================
+ PART 10: BUILD ORDER — WHAT TO CODE FIRST
+================================================================================
+
+WEEK 1-2: MVP (Lead Scoring + Revenue Agent)
+  ─────────────────────────────────────────
+  Day 1-2: AI Lead Scoring
+    - Create lib/ai-lead-scoring/ folder
+    - Build scoring engine (calls OpenAI)
+    - Store results in ai_insights + contacts.metadata
+    - Register feature in feature_registry
+    - Add UI: contact card shows score badge (HOT/WARM/COLD)
+    - Add filter: filter contacts by score range
+
+  Day 3-5: AI Revenue Agent
+    - Create lib/ai-revenue-agent/ folder
+    - Build follow-up scheduler (cron job)
+    - AI generates personalized follow-up emails
+    - Send via Resend API
+    - Track opens/clicks
+    - Add UI: "Follow-up History" tab on deals
+    - Add settings: follow-up frequency, escalation rules
+
+  Day 6-7: Billing Integration
+    - Connect Stripe
+    - Create plan products
+    - Add upgrade/downgrade flow
+    - Gate AI features by plan level
+    - Add usage tracking dashboard
+
+  Day 8-10: Testing & Polish
+    - Test with 3 real users
+    - Fix bugs
+    - Add error handling
+    - Add loading states
+    - Deploy to production
+
+WEEK 3-4: WhatsApp AI Closer
+  ─────────────────────────────────────────
+  Day 1-3: WhatsApp Integration
+    - Set up Meta Business API credentials
+    - Build webhook handler
+    - Store messages in whatsapp_messages table
+    - Inbound message → contact lookup/create
+
+  Day 4-7: AI WhatsApp Agent
+    - Build AI response generator
+    - Context-aware replies (uses contact history, deals, score)
+    - Handle objections, pricing questions
+    - Multi-language support (Hindi/Marathi/English)
+
+  Day 8-10: Voice Notes & Templates
+    - Add Whisper integration for voice notes
+    - Create message templates for common scenarios
+    - Add broadcast capability (opt-in customers only)
+    - Add conversation analytics
+
+WEEK 5-6: Proposals + Content Machine
+  ─────────────────────────────────────────
+  Day 1-3: AI Proposal Generator
+    - Build PDF generation engine
+    - Use deal data + product catalog + branding
+    - Send via email, track opens
+    - Add template system
+
+  Day 4-7: AI Content Machine
+    - Build content generation UI
+    - Support: posts, blogs, emails, ad copy
+    - Add scheduling and auto-posting
+    - Content calendar view
+
+WEEK 7-8: Voice Agent + Growth Agent
+  ─────────────────────────────────────────
+  Day 1-4: AI Voice Call Agent
+    - Integrate Twilio
+    - Build real-time audio streaming
+    - Connect to OpenAI Realtime API
+    - Store recordings, transcripts, summaries
+    - Add call scheduling
+
+  Day 5-7: AI Growth Agent (Bundle)
+    - Combine modules into "Growth Agent" package
+    - Add Google Review automation
+    - Add WhatsApp broadcast campaigns
+    - Add ad suggestions engine
+
+  Day 8-10: Launch Prep
+    - Final testing with beta customers
+    - Pricing page
+    - Documentation
+    - Onboarding flow
+    - Public launch
+
+
+================================================================================
+ FINAL SUMMARY
+================================================================================
+
+DATABASE:
+  - 18 core tables with JSONB metadata column (NEVER ALTER)
+  - 55+ extension tables (one per feature)
+  - Dynamic schema: new features add NO migrations for data fields
+  - Feature registry: self-documenting system
+  - Custom fields: tenants define their own fields via UI
+  - Backup/restore: per-tenant, 90-day retention
+
+AI MODULES:
+  - Lead Scoring → HOT/WARM/COLD scores stored in metadata
+  - Revenue Agent → Automated follow-ups via email/WhatsApp
+  - WhatsApp AI → Human-like conversations, multi-language
+  - Content Machine → Posts, blogs, emails, ad copy
+  - Voice Agent → AI calls leads, qualifies, books meetings
+  - Proposals → PDF proposals from deal data
+  - Missed Opportunity → Finds revenue gaps automatically
+
+INTEGRATIONS:
+  - WhatsApp Business API → messaging
+  - Twilio → voice calls
+  - Stripe → billing, metered usage
+  - OpenAI → all AI features
+  - Resend → email
+  - Redis → queues, caching
+  - S3/R2 → file storage, backups
+
+BILLING:
+  - 5 tiers: Free, Starter (₹999), Growth (₹2,999), Pro (₹5,999), Enterprise (₹14,999)
+  - Usage-based add-ons: WhatsApp, voice, content
+  - 74% profit margin per customer
+  - At 1000 customers: ₹23+ lakh/month profit
+
+SCALING:
+  - 100 customers: 1 server, ₹4K/mo
+  - 1000 customers: 3 servers + managed DB, ₹40K/mo
+  - 10,000 customers: Kubernetes cluster, ₹3L/mo
+
+EVERYTHING runs inside ONE app (NuCRM).
+NO separate apps needed.
+NO separate databases needed.
+EVERYTHING connects through the CRM's existing data model.
+
+================================================================================
+END OF DOCUMENT
+================================================================================

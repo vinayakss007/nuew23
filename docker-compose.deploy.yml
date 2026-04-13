@@ -1,0 +1,165 @@
+# Docker Compose — Plain VM Deployment
+# Usage: docker compose up -d
+# Works on any VPS (DigitalOcean, Hetzner, AWS EC2, etc.)
+
+services:
+  # ── Web App ──────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nucrm-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://nucrm:${POSTGRES_PASSWORD:-nucrm_pass}@db:5432/nucrm
+      - DATABASE_SSL=${DATABASE_SSL:-true}
+      - DATABASE_POOL_SIZE=10
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-change-me-to-random-64-hex-chars}
+      - CRON_SECRET=${CRON_SECRET:-change-me-to-16-chars-min}
+      - SETUP_KEY=${SETUP_KEY:-change-me-to-20-chars-min}
+      - NEXT_PUBLIC_APP_URL=${APP_URL:-http://localhost:3000}
+      - ALLOWED_ORIGINS=${APP_URL:-http://localhost:3000}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - nucrm-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # ── Background Worker ───────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: nucrm-worker
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://nucrm:${POSTGRES_PASSWORD:-nucrm_pass}@db:5432/nucrm
+      - DATABASE_SSL=${DATABASE_SSL:-true}
+      - REDIS_URL=redis://redis:6379
+      - CRON_SECRET=${CRON_SECRET:-change-me-to-16-chars-min}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - nucrm-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const Redis = require('ioredis'); new Redis().ping().then(() => process.exit(0)).catch(() => process.exit(1))\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  # ── PostgreSQL ───────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: nucrm-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=nucrm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nucrm_pass}
+      - POSTGRES_DB=nucrm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    # Internal only - not exposed to host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nucrm -d nucrm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - nucrm-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # ── Redis ────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: nucrm-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    # Internal only - not exposed to host
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nucrm-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+  # ── Nginx Reverse Proxy (HTTPS) ─────────────────────
+  # Optional: uncomment for production HTTPS
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: nucrm-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./certs:/etc/nginx/certs:ro
+  #   depends_on:
+  #     - web
+  #   networks:
+  #     - nucrm-net
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  nucrm-net:
+    driver: bridge

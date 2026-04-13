@@ -1,0 +1,11 @@
+name,website,industry,size,phone,address,status,notes
+Acme Corp,https://acme.com,Technology,51-200,+1-555-1001,New York NY,US,active,Enterprise platform customer
+TechStart,https://techstart.io,Software,1-10,+1-555-1002,San Francisco CA,US,active,Startup - API integration
+GlobalTech,https://globaltech.com,Consulting,201-500,+1-555-1003,Chicago IL,US,active,Annual consulting retainer
+Innovate Inc,https://innovate.co,Marketing,11-50,+1-555-1004,Austin TX,US,active,Marketing automation client
+Startup Co,https://startup.io,FinTech,1-10,+1-555-1005,London,GB,trial,Free trial - cloud migration
+CloudServices,https://cloudservices.com,Cloud,51-200,+1-555-1006,Seattle WA,US,active,Infrastructure services
+DataFlow AI,https://dataflow.ai,Artificial Intelligence,11-50,+1-555-1007,Los Angeles CA,US,active,ML platform customer
+FinTech Corp,https://fintech.com,Financial Services,201-500,+1-555-1008,Boston MA,US,prospect,Payment processing
+WebWorks,https://webworks.io,Web Development,11-50,+1-555-1009,Portland OR,US,active,Web agency partner
+Enterprise Global,https://enterprise.com,Manufacturing,1000+,+1-555-1010,Singapore,SG,enterprise,Global manufacturing client

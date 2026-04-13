@@ -1,0 +1,11 @@
+first_name,last_name,email,phone,title,company_name,company_size,company_industry,lead_status,lead_source,lifecycle_stage,budget,authority_level,country,state,city,website,utm_source,utm_campaign,tags,notes
+David,Miller,d.miller@bigco.com,+1-555-0201,Director,BigCo Inc,501-1000,Technology,new,website,lead,50000,decision_maker,US,California,San Jose,https://bigco.com,google,q1_campaign,"enterprise,high-value",Inbound from Google Ads
+Eva,Martinez,eva.m@midsize.com,+1-555-0202,Manager,MidSize LLC,51-200,Healthcare,contacted,referral,sales_qualified_lead,25000,influencer,US,Texas,Dallas,,linkedin,outreach,"healthcare,warm"
+Frank,Lee,frank@tiny.co,+1-555-0203,Owner,Tiny Co,1-10,Education,qualified,cold_outreach,lead,5000,decision_maker,US,New York,Brooklyn,https://tiny.co,,email_sequence,small business
+Grace,Kim,grace.kim@enterprise.com,+1-555-0204,VP Engineering,Enterprise Global,1000+,Manufacturing,nurturing,event,marketing_qualified_lead,100000,decision_maker,US,Washington,Seattle,https://enterprise.com,conference,sponsor_2026,"enterprise,hot",Met at conference booth
+Henry,Wilson,henry@agency.io,+1-555-0205,Account Director,Agency Pro,11-50,Marketing,new,website,lead,15000,unknown,CA,California,Los Angeles,https://agency.io,facebook,brand_awareness,
+Ivy,Chen,ivy.c@startup.io,+1-555-0206,Founder,StartupXYZ,1-10,FinTech,contacted,referral,lead,8000,decision_maker,US,Massachusetts,Boston,https://startup.io,,referral,seed round
+Jack,Roberts,jack@global.org,+1-555-0207,CIO,Global Org,501-1000,Finance,qualified,website,sales_qualified_lead,75000,decision_maker,US,Illinois,Chicago,https://global.org,google,q2_campaign,"finance,high-value"
+Karen,White,karen@design.co,+1-555-0208,Creative Director,Design Co,11-50,Design,new,social_media,lead,3000,influencer,US,Oregon,Portland,https://design.co,instagram,brand_awareness,
+Leo,Garcia,leo@retail.com,+1-555-0209,Store Manager,Retail Plus,201-500,Retail,contacted,cold_outreach,lead,20000,user,US,Florida,Miami,https://retail.com,,outreach_q1,
+Mia,Johnson,mia@legal.com,+1-555-0210,Partner,Legal LLP,51-200,Legal,nurturing,event,marketing_qualified_lead,35000,decision_maker,US,New York,New York,https://legal.com,webinar,legal_series,
