@@ -12,6 +12,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=1024"
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_APP_URL=http://localhost:3000
+ENV ALLOWED_ORIGINS=http://localhost:3000
 RUN npm run build
 
 # ── Production Runner ───────────────────────────────────
