@@ -8,6 +8,9 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
 
+  // Silence Turbopack warning, use webpack for builds
+  turbopack: {},
+
   devIndicators: {
     buildActivity: true,
     buildActivityPosition: 'bottom-right',
