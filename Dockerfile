@@ -6,6 +6,14 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --legacy-peer-deps
 
+# ── Builder ─────────────────────────────────────────────
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV NODE_ENV=production
+RUN npm run build
+
 # ── Production Runner ───────────────────────────────────
 FROM base AS runner
 WORKDIR /app
@@ -18,15 +26,14 @@ RUN apk add --no-cache curl
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Use pre-built .next from host (copied from running container)
-COPY .next ./.next
-COPY --from=deps /app/node_modules ./node_modules
-COPY public ./public
-COPY package.json ./package.json
-COPY next.config.mjs ./next.config.mjs
-COPY migrations ./migrations
-COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
-COPY scripts/push-db.mts ./scripts/push-db.mts
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/scripts/entrypoint.sh ./scripts/entrypoint.sh
+COPY --from=builder /app/scripts/push-db.mts ./scripts/push-db.mts
 RUN chmod +x ./scripts/entrypoint.sh
 
 USER nextjs
